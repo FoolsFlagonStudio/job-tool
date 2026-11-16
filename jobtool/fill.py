@@ -577,7 +577,13 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     log("\n  ** Sign in to LinkedIn in this window once (the tool remembers it), then reload the tab. **\n")
                 save_recruiter(db, job, pg)
                 open_pages[job["id"]] = (job, pg)
-                log(f"[{job['id']}] {job['company']} - {job['title']}")
+                try:   # same keyword scoring the form filler uses, run on the full job description
+                    full = pg.evaluate("() => (document.body && document.body.innerText || '').slice(0, 30000)")
+                    variant, _ = choose_resume(job["title"] + " " + full, cfg, base_dir)
+                    db.set(job["id"], resume=variant)
+                except Exception:
+                    variant = cfg.get("resumes", {}).get("default", "?")
+                log(f"[{job['id']}] {job['company']} - {job['title']}   ->  resume: {variant.upper()}")
 
         open_next()
         log(f"\nClick Easy Apply in each tab and submit. I mark each one when LinkedIn confirms it, and open the next."
