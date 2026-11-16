@@ -458,6 +458,8 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True,
                 changed = False
                 for jid, pg in list(open_pages.items()):
                     if pg.is_closed():
+                        db.set(jid, status="skipped")
+                        log(f"[{jid}] skipped (tab closed)")
                         del open_pages[jid]
                         changed = True
                         continue
@@ -511,6 +513,30 @@ HIRING_TEAM_JS = r"""() => {
 }"""
 
 
+# Only look at this job's own header/apply area and any popup, never the whole page:
+# the "similar jobs" sidebar shows "Applied" badges for OTHER jobs you applied to.
+APPLY_STATE_JS = r"""() => {
+  const parts = [];
+  document.querySelectorAll('[role="dialog"], [class*="artdeco-modal"]').forEach(d => parts.push(d.innerText || ''));
+  const sel = ['[class*="unified-top-card"]', '[class*="top-card"]', '[class*="jobs-s-apply"]',
+               '[class*="apply-button"]', '[class*="post-apply"]', '[class*="feedback-message"]'];
+  const main = document.querySelector('main') || document.body;
+  sel.forEach(s => main.querySelectorAll(s).forEach(e => {
+    if (!e.closest('[class*="similar"], [class*="recommend"], aside, [class*="jobs-search-results"]'))
+      parts.push(e.innerText || '');
+  }));
+  if (!parts.join('').trim()) parts.push((document.body.innerText || '').slice(0, 1200));  // fallback: page top only
+  return parts.join('\n').slice(0, 6000);
+}"""
+
+
+def apply_state(pg):
+    try:
+        return pg.evaluate(APPLY_STATE_JS)
+    except Exception:
+        return ""
+
+
 def linkedin_signed_in(ctx):
     try:
         return any(c["name"] == "li_at" for c in ctx.cookies("https://www.linkedin.com"))
@@ -562,7 +588,7 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     log(f"[{job['id']}] could not open: {type(e).__name__}")
                     pg.close()
                     continue
-                if EASY_DONE_RE.search(body):
+                if EASY_DONE_RE.search(apply_state(pg)):
                     db.set(job["id"], status="submitted", notes="Already applied on LinkedIn")
                     log(f"[{job['id']}] already applied - skipped")
                     pg.close()
@@ -587,22 +613,20 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
 
         open_next()
         log(f"\nClick Easy Apply in each tab and submit. I mark each one when LinkedIn confirms it, and open the next."
-            f" Close a tab to skip a job. {len(queue)} more in the queue. Ctrl+C or close the browser to stop.\n")
+            f" Close a tab to SKIP that job (it won't come back). {len(queue)} more in the queue. Ctrl+C or close the browser to stop.\n")
         try:
             while open_pages:
                 changed = False
                 for jid, (job, pg) in list(open_pages.items()):
                     if pg.is_closed():
+                        db.set(jid, status="skipped")
+                        log(f"[{jid}] skipped (tab closed)")
                         del open_pages[jid]
                         changed = True
                         continue
-                    try:
-                        body = pg.evaluate("() => (document.body && document.body.innerText || '').slice(0, 8000)")
-                    except Exception:
-                        continue
                     if not job.get("_rec"):
                         save_recruiter(db, job, pg)
-                    if EASY_DONE_RE.search(body):
+                    if EASY_DONE_RE.search(apply_state(pg)):
                         db.set(jid, status="submitted")
                         log(f"[{jid}] submitted  ({len(queue)} left in queue)")
                         del open_pages[jid]
