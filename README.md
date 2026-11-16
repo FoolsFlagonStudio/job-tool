@@ -61,7 +61,11 @@ python -m jobtool check greenhouse cargurus      # test a board token before add
 During `apply`, each job gets its own tab. Fix anything outlined in red, answer the essay questions, check the
 resume, and click Submit. Close the browser when you're done.
 
-The first time a site asks you to sign in, do it in that window. The browser profile in `data/browser-profile` remembers it.
+### Sign-ins
+The tool uses its own Chrome profile (`data/browser-profile`), **not** your everyday Chrome, so being logged in there doesn't count.
+- Greenhouse, Lever and Ashby need no account.
+- Workday needs a separate account per company. The first time, sign in or create the account yourself in the tool's window. It stays signed in after that.
+- If a job hits a sign-in wall, the tool marks it `needs_you` and leaves the tab open. Sign in there, then run `python -m jobtool apply --ids <id>` again.
 
 ## Adding companies
 
