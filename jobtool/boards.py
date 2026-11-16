@@ -3,7 +3,9 @@ through their public JSON feeds. No login, no scraping, no AI."""
 import json
 import re
 import time
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 UA = {"User-Agent": "Mozilla/5.0 (job-tool)", "Accept": "application/json"}
@@ -16,12 +18,22 @@ def fetch(url, data=None, timeout=30):
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=body, headers=headers)
     last = None
-    for _ in range(2):
+    for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return json.loads(r.read().decode("utf-8", "replace"))
-        except Exception as e:  # retry once
+        except urllib.error.HTTPError as e:
             last = e
+            if e.code == 429:              # rate limited: back off and try again
+                time.sleep(5 * (attempt + 1))
+                continue
+            if e.code in (400, 401, 403, 404) or attempt >= 1:
+                raise
+            time.sleep(2)
+        except Exception as e:
+            last = e
+            if attempt >= 1:
+                raise
             time.sleep(2)
     raise last
 
@@ -165,15 +177,30 @@ def scan(boards, cfg, seen, days, log=print):
     flt = Filters(cfg)
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     found, merged = [], {}
-    for b in boards:
+    def pull(b):
         reader = READERS.get(str(b.get("ats", "")).lower())
-        name = b.get("company") or b.get("token")
         if not reader:
-            log(f"SKIP {name}: unknown ATS {b.get('ats')}")
+            return b, None, f"unknown ATS {b.get('ats')}"
+        try:
+            return b, list(reader(b)), None
+        except Exception as e:
+            return b, None, f"{type(e).__name__}: {str(e)[:100]}"
+
+    # Workday sites share servers and rate-limit, so they get fewer parallel slots
+    wd = [b for b in boards if str(b.get("ats", "")).lower() == "workday"]
+    other = [b for b in boards if b not in wd]
+    with ThreadPoolExecutor(12) as ex1, ThreadPoolExecutor(3) as ex2:
+        futures = [ex1.submit(pull, b) for b in other] + [ex2.submit(pull, b) for b in wd]
+        results = [f.result() for f in futures]
+
+    for b, listing, err in results:
+        name = b.get("company") or b.get("token")
+        if err:
+            log(f"FAIL {name}: {err}")
             continue
         total = kept = 0
         try:
-            for j in reader(b):
+            for j in listing:
                 total += 1
                 if j["key"] in seen:
                     continue

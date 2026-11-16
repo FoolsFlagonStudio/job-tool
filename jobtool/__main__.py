@@ -1,9 +1,11 @@
 """job-tool: find early-career jobs and prefill applications for you to review and submit.
 
-  python -m jobtool find                 # check company boards + urls.txt, save new matches
+  python -m jobtool find                 # company boards, Built In, LinkedIn, urls.txt -> save new matches
+  python -m jobtool find --only boards   # just one source: boards | builtin | linkedin | urls
   python -m jobtool list [--status new]  # show the queue
   python -m jobtool apply [--count 5]    # open and prefill the next N, you review and submit
   python -m jobtool apply --ids 12 15    # prefill specific jobs
+  python -m jobtool apply --marathon     # keep 5 tabs filled, opening the next as you submit or close one
   python -m jobtool applied             # applications not yet copied to your tracker (then marks them copied)
   python -m jobtool applied --all       # every application, including ones already copied
   python -m jobtool mark 12 submitted    # fix a status by hand (new, filled, submitted, skipped, needs_you, closed)
@@ -47,14 +49,27 @@ def company_from_url(url):
 
 
 def cmd_find(args, cfg, db):
+    from . import sources as S
     seen = db.seen_keys()
-    added = 0
-    jobs = B.scan(cfg.get("boards", []), cfg, seen, args.days or cfg.get("lookback_days", 30))
+    days = args.days or cfg.get("lookback_days", 30)
+    want = lambda name: not args.only or name in args.only
+    jobs = []
+    if want("boards"):
+        jobs += B.scan(cfg.get("boards", []), cfg, seen, days)
+    if want("builtin"):
+        jobs += S.builtin(cfg, seen, days, BASE)
+    if want("linkedin"):
+        jobs += S.linkedin(cfg, seen)
+    added, easy = 0, 0
     for j in jobs:
-        dup = db.same_role_exists(j["company"], j["title"])
-        if dup:
+        if db.same_role_exists(j["company"], j["title"]):
             continue
-        added += db.add(j)
+        if db.add(j):
+            added += 1
+            easy += j["ats"] == "linkedin_easy"
+    if not want("urls"):
+        print(f"\n{added} new job(s) added.")
+        return
     # links pasted into urls.txt
     up = BASE / cfg.get("urls_file", "urls.txt")
     if up.exists():
@@ -69,6 +84,8 @@ def cmd_find(args, cfg, db):
                              "title": "(from urls.txt)", "location": "", "url": url,
                              "ats": ats_from_url(url), "posted": None})
     print(f"\n{added} new job(s) added. Run `python -m jobtool list` to see them.")
+    if easy:
+        print(f"{easy} of them are LinkedIn Easy Apply only: `python -m jobtool list --status new` marks them [EASY].")
 
 
 def cmd_list(args, cfg, db):
@@ -78,7 +95,8 @@ def cmd_list(args, cfg, db):
         return
     for r in rows:
         loc = (r["location"] or "")[:28]
-        print(f"{r['id']:>4}  {r['status']:<10} {r['posted'] or r['first_seen']}  "
+        tag = {"linkedin_easy": "[EASY] ", "workday": "[WD] ", "builtin": "[BI] ", "linkedin": "[LI] "}.get(r["ats"], "")
+        print(f"{r['id']:>4}  {r['status']:<10} {r['posted'] or r['first_seen']}  {tag}"
               f"{(r['company'] or '')[:22]:<22} {(r['title'] or '')[:52]:<52} {loc}")
         if args.notes and r["notes"]:
             print(f"      {r['notes']}")
@@ -88,13 +106,19 @@ def cmd_list(args, cfg, db):
 def cmd_apply(args, cfg, db):
     from . import fill
     profile = load_yaml("profile.yaml")
-    jobs = db.jobs(ids=args.ids) if args.ids else db.jobs(status="new", limit=args.count or cfg["apply"]["batch_size"])
-    jobs = [j for j in jobs if j["ats"] != "workday"] if not args.ids else jobs
+    if args.ids:
+        jobs = db.jobs(ids=args.ids)
+    else:
+        skip = {"linkedin_easy"} | (set() if args.workday else {"workday"})
+        jobs = [j for j in db.jobs(status="new") if j["ats"] not in skip]
+        if not args.marathon:
+            jobs = jobs[:args.count or cfg["apply"]["batch_size"]]
     if not jobs:
         print("No new jobs to apply to. Run `python -m jobtool find` first.")
         return
     print(f"Opening {len(jobs)} application(s)...")
-    fill.run(db, cfg, profile, BASE, jobs, headless=args.headless, watch=not args.no_watch)
+    keep = (args.count or cfg["apply"]["batch_size"]) if args.marathon else None
+    fill.run(db, cfg, profile, BASE, jobs, headless=args.headless, watch=not args.no_watch, keep_open=keep)
 
 
 def cmd_applied(args, cfg, db):
@@ -140,9 +164,13 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("find"); f.add_argument("--days", type=int)
+    f.add_argument("--only", nargs="+", choices=["boards", "builtin", "linkedin", "urls"])
     l = sub.add_parser("list"); l.add_argument("--status", choices=STATUSES); l.add_argument("--limit", type=int, default=60)
     l.add_argument("--notes", action="store_true", help="show what each filled job still needs")
     a = sub.add_parser("apply"); a.add_argument("--count", type=int); a.add_argument("--ids", type=int, nargs="+")
+    a.add_argument("--marathon", action="store_true",
+                   help="work through the whole queue, keeping --count tabs filled at a time")
+    a.add_argument("--workday", action="store_true", help="include Workday jobs (each site needs an account)")
     a.add_argument("--headless", action="store_true", help="testing only: no visible browser")
     a.add_argument("--no-watch", action="store_true", help="don't wait for you to submit")
     ap_ = sub.add_parser("applied"); ap_.add_argument("--all", action="store_true")

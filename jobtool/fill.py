@@ -38,6 +38,9 @@ COLLECT_JS = r"""
       name: el.name || '', id: el.id || '', accept: el.accept || ''}); return; }
     if (!vis(el)) return;
     if (type === 'radio' || type === 'checkbox') return;   // handled as groups below
+    if (el.getAttribute('aria-hidden') === 'true' || el.readOnly && el.tabIndex === -1) return;
+    const cs = getComputedStyle(el);
+    if (parseFloat(cs.opacity) === 0 && el.getAttribute('role') !== 'combobox') return;   // handled as groups below
     const kind = el.tagName === 'SELECT' ? 'select'
       : (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete')) ? 'combobox'
       : el.tagName === 'TEXTAREA' ? 'textarea' : 'text';
@@ -178,8 +181,34 @@ def application_url(url, ats):
     return url
 
 
+def follow_apply(page):
+    """On a listing site (Built In, LinkedIn guest page), click Apply and land on the company's form."""
+    btn = page.get_by_role("link", name=re.compile(r"^\s*apply", re.I))
+    if btn.count() == 0:
+        btn = page.get_by_role("button", name=re.compile(r"^\s*apply", re.I))
+    if btn.count() == 0:
+        return page
+    try:
+        with page.context.expect_page(timeout=6000) as new:
+            btn.first.click(timeout=4000)
+        target = new.value
+        target.wait_for_load_state("domcontentloaded", timeout=30000)
+        url = target.url
+        target.close()
+        page.goto(url, wait_until="domcontentloaded", timeout=45000)
+    except Exception:
+        page.wait_for_timeout(2500)   # same-tab navigation, or nothing happened
+    return page
+
+
 def open_application(page, url, ats):
     page.goto(application_url(url, ats), wait_until="domcontentloaded", timeout=45000)
+    if ats in ("builtin", "linkedin") or re.search(r"builtin(boston)?\.com|linkedin\.com", page.url):
+        follow_apply(page)
+        from .sources import ats_from_url
+        new_ats = ats_from_url(page.url)
+        if new_ats in ("lever", "ashby"):
+            page.goto(application_url(page.url, new_ats), wait_until="domcontentloaded", timeout=45000)
     try:
         page.wait_for_load_state("networkidle", timeout=10000)
     except Exception:
@@ -202,6 +231,53 @@ def open_application(page, url, ats):
                     break
                 except Exception:
                     pass
+
+
+# ---------------------------------------------------------------- dropdowns
+OPTIONS_JS = r"""() => (document.querySelectorAll('[data-jt-opt]').forEach(o => o.removeAttribute('data-jt-opt')),
+  [...document.querySelectorAll('[role="option"], [class*="select__option"], [class*="option--"]')]
+  .filter(o => { const r = o.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+  .map((o, i) => { o.setAttribute('data-jt-opt', String(i)); return (o.innerText || '').trim(); }))"""
+
+HAS_VALUE_JS = r"""(jt) => { const el = document.querySelector(`[data-jt="${jt}"]`); if (!el) return false;
+  const box = el.closest('[class*="control"], [class*="container"]') || el.parentElement;
+  return !!(box && box.querySelector('[class*="single-value"], [class*="singleValue"], [class*="multi-value"]')); }"""
+
+
+def combobox_has_value(page, jt):
+    try:
+        return page.evaluate(HAS_VALUE_JS, jt)
+    except Exception:
+        return False
+
+
+def pick_combobox(page, jt, ans):
+    """Open a searchable dropdown, type the answer, click the option that matches best."""
+    el = page.locator(f'[data-jt="{jt}"]')
+    try:
+        el.scroll_into_view_if_needed(timeout=2000)
+        el.click(timeout=3000, force=True)
+    except Exception:
+        return False
+    page.wait_for_timeout(250)
+    page.keyboard.type(ans[:30], delay=15)     # keyboard works even where .fill() is refused
+    page.wait_for_timeout(600)
+    texts = page.evaluate(OPTIONS_JS)
+    if not texts:                               # not searchable: clear the typing and list everything
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+        page.wait_for_timeout(300)
+        texts = page.evaluate(OPTIONS_JS)
+    choice = best_option(texts, ans) if texts else None
+    if choice is None:
+        page.keyboard.press("Escape")
+        return False
+    try:
+        page.locator(f'[data-jt-opt="{texts.index(choice)}"]').first.click(timeout=3000)
+    except Exception:
+        page.keyboard.press("Enter")
+    page.wait_for_timeout(200)
+    return True
 
 
 # ---------------------------------------------------------------- filling
@@ -248,19 +324,13 @@ def fill_page(page, rules, resume_path, log):
                     missing.append(label)
                     page.evaluate(HIGHLIGHT_JS, f["jt"])
             elif kind == "combobox":
-                if f.get("value"):
+                if f.get("value") or combobox_has_value(page, f["jt"]):
                     continue
-                if ans:
-                    el = page.locator(f'[data-jt="{f["jt"]}"]')
-                    el.click()
-                    el.fill(ans)
-                    page.wait_for_timeout(700)
-                    opt = page.get_by_role("option").filter(has_text=re.compile(re.escape(ans[:20]), re.I))
-                    if opt.count():
-                        opt.first.click()
-                    else:
-                        el.press("Enter")
+                if ans and pick_combobox(page, f["jt"], ans):
                     filled += 1
+                elif ans:
+                    missing.append(f"{label} (no option matched '{ans}')")
+                    page.evaluate(HIGHLIGHT_JS, f["jt"])
                 elif f.get("required"):
                     missing.append(label)
                     page.evaluate(HIGHLIGHT_JS, f["jt"])
@@ -277,7 +347,11 @@ def fill_page(page, rules, resume_path, log):
                         page.evaluate(HIGHLIGHT_JS, o["jt"])
         except Exception as e:
             missing.append(f"{label} (could not fill: {type(e).__name__})")
-    return filled, [m for m in missing if m]
+    out = []
+    for m in missing:
+        if m and m not in out:
+            out.append(m)
+    return filled, out
 
 
 def page_title(page):
@@ -293,67 +367,106 @@ def page_title(page):
 
 
 # ---------------------------------------------------------------- main entry
-def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True):
+CLOSED_RE = re.compile(r"no longer (accepting|available|open)|position (has been )?filled|job not found|"
+                       r"this job (is|has) (closed|expired)|page you('re| are) looking for", re.I)
+
+
+def prepare(ctx, db, cfg, rules, base_dir, job, log):
+    """Open one job in a new tab and prefill it. Returns the page, or None if there's nothing to review."""
+    log(f"\n[{job['id']}] {job['company']} - {job['title']}")
+    page = ctx.new_page()
+    page.set_default_timeout(5000)            # never hang 30s on one field while you're typing
+    try:
+        open_application(page, job["url"], job["ats"])
+        text = page.inner_text("body")[:20000]
+        if CLOSED_RE.search(text[:4000]):
+            log("    posting is closed")
+            db.set(job["id"], status="closed")
+            page.close()
+            return None
+        if job["title"] == "(from urls.txt)":
+            real = page_title(page)
+            if real:
+                db.set(job["id"], title=real)
+        variant, resume = choose_resume(text, cfg, base_dir)
+        filled, missing = fill_page(page, rules, resume, log)
+        if (re.search(r"create (an )?account|sign in|log in", text[:6000], re.I) and filled < 3) or \
+                "linkedin.com" in page.url:
+            status = "needs_you"
+            missing.insert(0, "Site wants an account or sign-in (or it's LinkedIn Easy Apply)")
+        else:
+            status = "filled"
+        note = ("Needs: " + "; ".join(missing[:12])) if missing else "All fields filled"
+        db.set(job["id"], status=status, resume=variant, notes=note)
+        log(f"    resume: {variant} | filled {filled} fields | {note}")
+        log(f"    READY - tab is yours: [{job['id']}] {job['company']}")
+        return page
+    except Exception as e:
+        log(f"    could not open or fill: {type(e).__name__}: {str(e)[:120]}")
+        db.set(job["id"], status="needs_you", notes=f"Open manually: {type(e).__name__}")
+        return page if not page.is_closed() else None
+
+
+def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True, keep_open=None):
+    """Fill jobs. keep_open=N: keep N prefilled tabs open, and open the next job each time you
+    submit or close one, until the queue runs out (good for long sessions)."""
     from playwright.sync_api import sync_playwright
 
     rules = build_rules(profile)
     ac = cfg.get("apply", {})
+    queue = list(jobs)
     with sync_playwright() as pw:
-        kwargs = dict(headless=headless, slow_mo=ac.get("slow_mo_ms", 50),
+        kwargs = dict(headless=headless, slow_mo=ac.get("slow_mo_ms", 0),
                       viewport={"width": 1280, "height": 900})
         if ac.get("browser", "chrome") == "chrome":
             kwargs["channel"] = "chrome"
         ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"), **kwargs)
         open_pages = {}
-        for job in jobs:
-            log(f"\n[{job['id']}] {job['company']} - {job['title']}")
-            page = ctx.new_page()
-            try:
-                open_application(page, job["url"], job["ats"])
-                text = page.inner_text("body")[:20000]
-                if re.search(r"no longer (accepting|available|open)|position (has been )?filled|job not found", text, re.I):
-                    log("    posting is closed")
-                    db.set(job["id"], status="closed")
-                    page.close()
-                    continue
-                if job["title"] == "(from urls.txt)":
-                    real = page_title(page)
-                    if real:
-                        db.set(job["id"], title=real)
-                variant, resume = choose_resume(text, cfg, base_dir)
-                filled, missing = fill_page(page, rules, resume, log)
-                if re.search(r"create (an )?account|sign in to apply|log in to apply", text, re.I) and filled < 3:
-                    status = "needs_you"
-                    missing.insert(0, "Site wants an account or sign-in")
-                else:
-                    status = "filled"
-                note = ("Needs: " + "; ".join(missing[:12])) if missing else "All fields filled"
-                db.set(job["id"], status=status, resume=variant, notes=note)
-                log(f"    resume: {variant} | filled {filled} fields | {note}")
-                open_pages[job["id"]] = page
-            except Exception as e:
-                log(f"    could not open or fill: {type(e).__name__}: {str(e)[:120]}")
-                db.set(job["id"], status="needs_you", notes=f"Open manually: {type(e).__name__}")
+        target = keep_open or len(queue)
+
+        def top_up():
+            while queue and len(open_pages) < target:
+                job = queue.pop(0)
+                pg = prepare(ctx, db, cfg, rules, base_dir, job, log)
+                if pg:
+                    open_pages[job["id"]] = pg
+            if open_pages:
+                try:
+                    next(iter(open_pages.values())).bring_to_front()
+                except Exception:
+                    pass
+
+        top_up()
         if not watch or headless:
             ctx.close()
             return
-        log("\nReview each tab, fix anything highlighted in red, and click Submit yourself.")
-        log("I'll mark each one submitted when its confirmation page appears.")
+        log("\nReview each tab, fix anything outlined in red, and click Submit yourself.")
+        log("I mark each one submitted when its confirmation page appears." +
+            (f" Close a tab to skip it; I'll keep {target} open until the queue ({len(queue)} left) is empty."
+             if keep_open else ""))
         log("Close the browser (or press Ctrl+C) when you're done.\n")
         try:
             while open_pages:
+                changed = False
                 for jid, pg in list(open_pages.items()):
                     if pg.is_closed():
                         del open_pages[jid]
+                        changed = True
                         continue
                     try:
-                        body = pg.inner_text("body", timeout=2000)[:5000]
+                        body = pg.evaluate("() => (document.body && document.body.innerText || '').slice(0, 5000)")
                     except Exception:
                         continue
                     if CONFIRM_RE.search(body) or re.search(r"confirmation|thank", pg.url, re.I):
                         db.set(jid, status="submitted")
-                        log(f"[{jid}] submitted")
+                        log(f"[{jid}] submitted" + (f"  ({len(queue)} left in queue)" if keep_open else ""))
                         del open_pages[jid]
+                        changed = True
+                        if keep_open:
+                            pg.wait_for_timeout(1500)
+                            pg.close()        # keep the window tidy in long sessions
+                if changed and keep_open:
+                    top_up()
                 time.sleep(3)
         except KeyboardInterrupt:
             pass

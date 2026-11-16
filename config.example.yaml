@@ -15,7 +15,7 @@ filters:
   title_exclude: [senior, sr, staff, principal, lead, manager, director, head, vp, architect,
     intern, internship, co-op, iii, iv, distinguished, fellow, mechanical, electrical, hardware,
     firmware, rf, optical, chemical, civil, manufacturing, sales, recruit, technician, field,
-    quality, validation, analog, asic, fpga, silicon, thermal, structural]
+    quality, validation, analog, asic, fpga, silicon, thermal, structural, avp, assistant vice president, vice president, 'training material', sap, salesforce, servicenow]
   # "Engineer" titles must also contain one of these (so "Process Engineer" is skipped)
   engineer_needs_one_of: [software, 'full.?stack', 'front.?end', 'back.?end', web, application, platform,
     api, data, cloud, devops, infrastructure, ui, ux, mobile, ios, android, java, python, react,
@@ -64,9 +64,34 @@ resumes:
 apply:
   batch_size: 5             # how many applications to open and fill per run
   browser: chrome           # chrome = your installed Google Chrome; chromium = Playwright's own
-  slow_mo_ms: 50            # small delay between actions so sites don't choke
+  slow_mo_ms: 0             # raise (e.g. 50) only if a site chokes on fast typing
 
 # ---------------- company boards ----------------
+# ---- other sources (no account needed, no AI) ----
+sources:
+  builtin:
+    enabled: true
+    headless: true          # set false if Built In starts showing a "verify you are human" page
+    max_pages: 3
+    pages:
+      - https://www.builtinboston.com/jobs/dev-engineering/entry-level
+      - https://www.builtinboston.com/jobs/dev-engineering/junior
+      - https://www.builtinboston.com/jobs/dev-engineering/mid-level
+  linkedin:
+    enabled: true           # LinkedIn's public (logged-out) search: your account is never used
+    past: day               # day | week | month  (use week on your first run or after a few days off)
+    experience: [2, 3]      # 1 internship, 2 entry level, 3 associate, 4 mid-senior
+    max_results_per_search: 100
+    pause_seconds: 2        # be gentle: LinkedIn throttles fast scrapers
+    searches:
+      - {keywords: "software engineer", location: "Boston, Massachusetts, United States", distance: 25}
+      - {keywords: "full stack engineer", location: "Boston, Massachusetts, United States", distance: 25}
+      - {keywords: "frontend engineer", location: "Boston, Massachusetts, United States", distance: 25}
+      - {keywords: "backend engineer", location: "Boston, Massachusetts, United States", distance: 25}
+      - {keywords: "web developer", location: "Boston, Massachusetts, United States", distance: 25}
+      - {keywords: "junior software engineer", location: "United States", remote: true}
+      - {keywords: "software engineer I", location: "United States", remote: true}
+
 # ats: greenhouse | lever | ashby | smartrecruiters | workday (workday needs feed:)
 # Add one with:  python -m jobtool check greenhouse <token>
 boards:
@@ -114,3 +139,57 @@ boards:
   - {company: "Linear", ats: ashby, token: linear}
   - {company: "Vercel", ats: greenhouse, token: vercel}
   - {company: "Cell Signaling Technology", ats: greenhouse, token: cellsignalingtechnology79}   # Danvers, life sciences
+
+  # ---- added Nov 15: big Boston-area employers on Workday (apply needs an account per company) ----
+  - {company: "Fidelity Investments", ats: workday, token: fmr, feed: "https://fmr.wd1.myworkdayjobs.com/wday/cxs/fmr/FidelityCareers/jobs"}
+  - {company: "athenahealth", ats: workday, token: athenahealth, feed: "https://athenahealth.wd1.myworkdayjobs.com/wday/cxs/athenahealth/External/jobs"}
+  - {company: "State Street", ats: workday, token: statestreet, feed: "https://statestreet.wd1.myworkdayjobs.com/wday/cxs/statestreet/Global/jobs"}
+  - {company: "Analog Devices", ats: workday, token: analogdevices, feed: "https://analogdevices.wd1.myworkdayjobs.com/wday/cxs/analogdevices/External/jobs"}
+  - {company: "Moderna", ats: workday, token: modernatx, feed: "https://modernatx.wd1.myworkdayjobs.com/wday/cxs/modernatx/M_tx/jobs"}
+  - {company: "Thermo Fisher", ats: workday, token: thermofisher, feed: "https://thermofisher.wd5.myworkdayjobs.com/wday/cxs/thermofisher/ThermoFisherCareers/jobs"}
+  - {company: "Mass General Brigham", ats: workday, token: massgeneralbrigham, feed: "https://massgeneralbrigham.wd1.myworkdayjobs.com/wday/cxs/massgeneralbrigham/MGBExternal/jobs"}
+  - {company: "RTX (Raytheon)", ats: workday, token: globalhr, feed: "https://globalhr.wd5.myworkdayjobs.com/wday/cxs/globalhr/REC_RTX_Ext_Gateway/jobs"}
+  - {company: "PTC", ats: workday, token: ptc, feed: "https://ptc.wd1.myworkdayjobs.com/wday/cxs/ptc/PTC/jobs"}
+  - {company: "John Hancock / Manulife", ats: workday, token: manulife, feed: "https://manulife.wd3.myworkdayjobs.com/wday/cxs/manulife/MFCJH_Jobs/jobs"}
+  - {company: "Vertex Pharmaceuticals", ats: workday, token: vrtx, feed: "https://vrtx.wd501.myworkdayjobs.com/wday/cxs/vrtx/Vertex_Careers/jobs"}
+  - {company: "Draper", ats: workday, token: draper, feed: "https://draper.wd5.myworkdayjobs.com/wday/cxs/draper/Draper_Careers/jobs"}
+  - {company: "Philips", ats: workday, token: philips, feed: "https://philips.wd3.myworkdayjobs.com/wday/cxs/philips/jobs-and-careers/jobs"}
+  - {company: "Nasdaq", ats: workday, token: nasdaq, feed: "https://nasdaq.wd1.myworkdayjobs.com/wday/cxs/nasdaq/Global_External_Site/jobs"}
+  - {company: "Santander US", ats: workday, token: santander, feed: "https://santander.wd3.myworkdayjobs.com/wday/cxs/santander/SantanderCareers/jobs"}
+  - {company: "Cengage", ats: workday, token: cengage, feed: "https://cengage.wd5.myworkdayjobs.com/wday/cxs/cengage/CengageNorthAmericaCareers/jobs"}
+  - {company: "Blue Cross Blue Shield MA", ats: workday, token: bcbsma, feed: "https://bcbsma.wd5.myworkdayjobs.com/wday/cxs/bcbsma/BCBSMA/jobs"}
+  - {company: "Wellington Management", ats: workday, token: wellington, feed: "https://wellington.wd5.myworkdayjobs.com/wday/cxs/wellington/External/jobs"}
+  # ---- added Nov 15: more Greenhouse / Lever / Ashby companies (Boston offices or US remote) ----
+  - {company: "Salsify", ats: greenhouse, token: salsify}
+  - {company: "mabl", ats: greenhouse, token: mabl}
+  - {company: "Acquia", ats: greenhouse, token: acquia}
+  - {company: "Dremio", ats: greenhouse, token: dremio}
+  - {company: "SmartBear", ats: greenhouse, token: smartbear}
+  - {company: "Wasabi", ats: greenhouse, token: wasabi}
+  - {company: "Tripadvisor", ats: greenhouse, token: tripadvisor}
+  - {company: "Thrive", ats: greenhouse, token: thrive}
+  - {company: "Hometap", ats: greenhouse, token: hometap}
+  - {company: "Attentive", ats: greenhouse, token: attentive}
+  - {company: "Amwell", ats: greenhouse, token: amwell}
+  - {company: "Agero", ats: greenhouse, token: agero}
+  - {company: "LabCentral", ats: greenhouse, token: labcentral}
+  - {company: "Jellyvision", ats: greenhouse, token: jellyvision}
+  - {company: "Appian", ats: greenhouse, token: appian}
+  - {company: "Duolingo", ats: greenhouse, token: duolingo}
+  - {company: "Coursera", ats: greenhouse, token: coursera}
+  - {company: "Greenlight", ats: lever, token: greenlight}
+  - {company: "Vida Health", ats: lever, token: vida}
+  - {company: "Drata", ats: ashby, token: drata}
+  - {company: "Hex", ats: ashby, token: hex}
+  - {company: "Harvey", ats: ashby, token: harvey}
+  - {company: "Replit", ats: ashby, token: replit}
+  - {company: "Modal", ats: ashby, token: modal}
+  - {company: "PostHog", ats: ashby, token: posthog}
+  - {company: "Notion", ats: ashby, token: notion}
+  - {company: "Vanta", ats: ashby, token: vanta}
+  - {company: "Watershed", ats: ashby, token: watershed}
+  - {company: "Supabase", ats: ashby, token: supabase}
+  - {company: "Warp", ats: ashby, token: warp}
+  - {company: "Temporal", ats: ashby, token: temporal}
+  - {company: "Writer", ats: ashby, token: writer}
+  - {company: "Cursor", ats: ashby, token: cursor}

@@ -21,6 +21,8 @@ personal:
 answers:
   - {match: '(willing|able|eligible) to (obtain|get|acquire).*clearance', answer: "Yes"}
   - {match: ['(currently )?hold.*clearance', 'active.*clearance', 'current.*clearance'], answer: "No"}
+  - {match: 'family members? .*(employ|director)|relatives? .*(employ|work)|related to (an|any) employee', answer: "No"}
+  - {match: 'located in the (us|u\.s\.|united states)|(reside|live) in the (us|u\.s\.|united states)', answer: "Yes"}
   - {match: 'authori[sz]ed to work|legally (authori[sz]ed|eligible)|eligib\w* to work', answer: "Yes"}
   - {match: 'sponsor', answer: "No"}
   - {match: 'relocat', answer: "Yes"}
