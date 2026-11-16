@@ -415,6 +415,7 @@ def prepare(ctx, db, cfg, rules, base_dir, job, log):
 
 
 def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True, keep_open=None):
+    jobs = [dict(j) for j in jobs]
     """Fill jobs. keep_open=N: keep N prefilled tabs open, and open the next job each time you
     submit or close one, until the queue runs out (good for long sessions)."""
     from playwright.sync_api import sync_playwright
@@ -477,8 +478,9 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True,
                 time.sleep(3)
         except KeyboardInterrupt:
             pass
-        except Exception:
-            pass   # browser closed
+        except Exception as e:   # browser closed is normal; anything else gets reported
+            if "closed" not in str(e).lower():
+                log(f"Stopped because of an error: {type(e).__name__}: {str(e)[:200]}")
         try:
             ctx.close()
         except Exception:
@@ -509,16 +511,42 @@ HIRING_TEAM_JS = r"""() => {
 }"""
 
 
-def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print):
+def linkedin_signed_in(ctx):
+    try:
+        return any(c["name"] == "li_at" for c in ctx.cookies("https://www.linkedin.com"))
+    except Exception:
+        return False
+
+
+def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, need_login=True):
     from playwright.sync_api import sync_playwright
     ac = cfg.get("apply", {})
-    queue = list(jobs)
+    queue = [dict(j) for j in jobs]
     with sync_playwright() as pw:
-        kwargs = dict(headless=False, viewport={"width": 1280, "height": 900})
+        kwargs = dict(headless=headless, viewport={"width": 1280, "height": 900})
         if ac.get("browser", "chrome") == "chrome":
             kwargs["channel"] = "chrome"
         ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"), **kwargs)
-        open_pages, warned = {}, False
+        open_pages, warned = {}, True
+
+        if need_login and not linkedin_signed_in(ctx):
+            pg = ctx.pages[0] if ctx.pages else ctx.new_page()
+            pg.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
+            log("Sign in to LinkedIn in the browser window (the tool remembers it after this).")
+            log("I'll start opening jobs as soon as you're signed in...")
+            try:
+                while not linkedin_signed_in(ctx):
+                    if not ctx.pages:
+                        log("Browser closed before sign-in.")
+                        return
+                    time.sleep(2)
+            except KeyboardInterrupt:
+                return
+            log("Signed in.\n")
+            try:
+                pg.close()
+            except Exception:
+                pass
 
         def open_next():
             nonlocal warned
@@ -580,8 +608,9 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print):
                 time.sleep(3)
         except KeyboardInterrupt:
             pass
-        except Exception:
-            pass
+        except Exception as e:
+            if "closed" not in str(e).lower():
+                log(f"Stopped because of an error: {type(e).__name__}: {str(e)[:200]}")
         try:
             ctx.close()
         except Exception:
