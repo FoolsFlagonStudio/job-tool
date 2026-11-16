@@ -4,6 +4,8 @@
   python -m jobtool list [--status new]  # show the queue
   python -m jobtool apply [--count 5]    # open and prefill the next N, you review and submit
   python -m jobtool apply --ids 12 15    # prefill specific jobs
+  python -m jobtool applied             # applications not yet copied to your tracker (then marks them copied)
+  python -m jobtool applied --all       # every application, including ones already copied
   python -m jobtool mark 12 submitted    # fix a status by hand (new, filled, submitted, skipped, needs_you, closed)
   python -m jobtool check greenhouse cargurus   # verify a company board token before adding it
 """
@@ -95,6 +97,31 @@ def cmd_apply(args, cfg, db):
     fill.run(db, cfg, profile, BASE, jobs, headless=args.headless, watch=not args.no_watch)
 
 
+def cmd_applied(args, cfg, db):
+    import csv
+    rows = db.applied(include_exported=args.all, since=args.since)
+    if not rows:
+        print("No new applications to copy over." if not args.all else "No submitted applications yet.")
+        return
+    out = BASE / "applied.csv"
+    new_file = not out.exists()
+    header = ["Date applied", "Company", "Job title", "Location", "Link", "Resume"]
+    lines = [[r["submitted_at"] or r["updated"], r["company"], r["title"], r["location"] or "",
+              r["url"], r["resume"] or ""] for r in rows]
+    print("\t".join(header))
+    for l in lines:
+        print("\t".join(l))
+    if not args.all:
+        with open(out, "a", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            if new_file:
+                w.writerow(header)
+            w.writerows(lines)
+        db.mark_exported([r["id"] for r in rows])
+        print(f"\n{len(rows)} application(s) above. Tab-separated, so they paste straight into a sheet or table.")
+        print(f"Also added to {out.name}. They won't show here again (use --all to see everything).")
+
+
 def cmd_mark(args, cfg, db):
     db.set(args.id, status=args.status)
     print(f"Job {args.id} -> {args.status}")
@@ -118,6 +145,8 @@ def main():
     a = sub.add_parser("apply"); a.add_argument("--count", type=int); a.add_argument("--ids", type=int, nargs="+")
     a.add_argument("--headless", action="store_true", help="testing only: no visible browser")
     a.add_argument("--no-watch", action="store_true", help="don't wait for you to submit")
+    ap_ = sub.add_parser("applied"); ap_.add_argument("--all", action="store_true")
+    ap_.add_argument("--since", help="only applications on or after this date, YYYY-MM-DD")
     m = sub.add_parser("mark"); m.add_argument("id", type=int); m.add_argument("status", choices=STATUSES)
     c = sub.add_parser("check"); c.add_argument("ats"); c.add_argument("token"); c.add_argument("feed", nargs="?")
     args = ap.parse_args()
@@ -126,7 +155,7 @@ def main():
         return cmd_check(args, None, None)
     cfg = load_yaml("config.yaml")
     db = DB(BASE / cfg.get("database", "data/jobs.db"))
-    {"find": cmd_find, "list": cmd_list, "apply": cmd_apply, "mark": cmd_mark}[args.cmd](args, cfg, db)
+    {"find": cmd_find, "list": cmd_list, "applied": cmd_applied, "apply": cmd_apply, "mark": cmd_mark}[args.cmd](args, cfg, db)
 
 
 if __name__ == "__main__":

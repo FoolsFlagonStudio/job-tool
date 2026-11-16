@@ -280,6 +280,18 @@ def fill_page(page, rules, resume_path, log):
     return filled, [m for m in missing if m]
 
 
+def page_title(page):
+    """Best guess at the job title for links pasted into urls.txt."""
+    try:
+        h1 = page.locator("h1").first
+        t = h1.inner_text(timeout=2000).strip() if h1.count() else ""
+    except Exception:
+        t = ""
+    if not t or len(t) > 120:
+        t = re.split(r"\s[-|@]\s", page.title() or "")[0].strip()
+    return t[:120] or None
+
+
 # ---------------------------------------------------------------- main entry
 def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True):
     from playwright.sync_api import sync_playwright
@@ -304,6 +316,10 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True)
                     db.set(job["id"], status="closed")
                     page.close()
                     continue
+                if job["title"] == "(from urls.txt)":
+                    real = page_title(page)
+                    if real:
+                        db.set(job["id"], title=real)
                 variant, resume = choose_resume(text, cfg, base_dir)
                 filled, missing = fill_page(page, rules, resume, log)
                 if re.search(r"create (an )?account|sign in to apply|log in to apply", text, re.I) and filled < 3:

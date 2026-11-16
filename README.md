@@ -54,12 +54,26 @@ python -m jobtool apply              # open and prefill the next 5 (batch_size i
 python -m jobtool apply --count 10
 python -m jobtool apply --ids 12 15  # specific jobs
 python -m jobtool list --status filled --notes   # what each prefilled job still needs
+python -m jobtool applied           # what you've applied to since last time: date, company, title, link
+python -m jobtool applied --all     # every application
 python -m jobtool mark 12 skipped    # statuses: new filled submitted skipped needs_you closed
 python -m jobtool check greenhouse cargurus      # test a board token before adding it
 ```
 
 During `apply`, each job gets its own tab. Fix anything outlined in red, answer the essay questions, check the
 resume, and click Submit. Close the browser when you're done.
+
+### Tracking what you applied to
+When a confirmation page appears after you click Submit, the tool marks that job submitted and saves the date.
+If it misses one, run `python -m jobtool mark <id> submitted`.
+
+`python -m jobtool applied` prints every application you haven't copied over yet, one tab-separated row each
+(Date applied, Company, Job title, Location, Link, Resume). Select the rows and paste them into a spreadsheet
+or tracker table, and each value lands in its own column. Those rows also get added to `applied.csv`, a running log you can open in
+Excel. Each application shows up only once, so you never copy the same one twice. `--all` shows everything again,
+and `--since 2026-11-01` limits it by date.
+
+Jobs you paste into `urls.txt` get their real job title from the posting page the first time `apply` opens them.
 
 ### Sign-ins
 The tool uses its own Chrome profile (`data/browser-profile`), **not** your everyday Chrome, so being logged in there doesn't count.

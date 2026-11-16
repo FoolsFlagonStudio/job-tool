@@ -24,6 +24,11 @@ class DB:
         self.con = sqlite3.connect(path)
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
+        cols = {r["name"] for r in self.con.execute("PRAGMA table_info(jobs)")}
+        for col in ("submitted_at", "exported_at"):   # added later: upgrade older databases
+            if col not in cols:
+                self.con.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
+        self.con.commit()
 
     def seen_keys(self):
         keys = set()
@@ -69,6 +74,24 @@ class DB:
 
     def set(self, job_id, **fields):
         fields["updated"] = date.today().isoformat()
+        if fields.get("status") == "submitted" and "submitted_at" not in fields:
+            fields["submitted_at"] = fields["updated"]
         cols = ", ".join(f"{k} = ?" for k in fields)
         self.con.execute(f"UPDATE jobs SET {cols} WHERE id = ?", (*fields.values(), job_id))
+        self.con.commit()
+
+    def applied(self, include_exported=False, since=None):
+        q = "SELECT * FROM jobs WHERE status = 'submitted'"
+        args = []
+        if not include_exported:
+            q += " AND exported_at IS NULL"
+        if since:
+            q += " AND COALESCE(submitted_at, updated) >= ?"
+            args.append(since)
+        q += " ORDER BY COALESCE(submitted_at, updated), id"
+        return self.con.execute(q, args).fetchall()
+
+    def mark_exported(self, ids):
+        today = date.today().isoformat()
+        self.con.executemany("UPDATE jobs SET exported_at = ? WHERE id = ?", [(today, i) for i in ids])
         self.con.commit()
