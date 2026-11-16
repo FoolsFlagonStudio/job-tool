@@ -1,0 +1,46 @@
+# Your application answers. Copy to profile.yaml and fill in. (profile.yaml is git-ignored.)
+# The filler reads each form field's label and uses the first rule that matches it.
+# Fields it can't match are left blank and outlined in red for you.
+
+personal:
+  first_name: Jane
+  last_name: Doe
+  preferred_name: Jane
+  email: jane@example.com
+  phone: "(555) 555-5555"
+  location: "Boston, MA"            # for "Location" / "Where are you based" fields
+  address: {street: "1 Main St", city: Boston, state: MA, zip: "02110", country: United States}
+  linkedin: https://linkedin.com/in/your-handle
+  github: https://github.com/your-handle
+  website: https://your-site.com
+  current_company: Your Company
+  current_title: Your Title
+
+# Ordered rules: `match` is a regex (or list) tested against the field label, case-insensitive.
+# Put more specific rules above general ones.
+answers:
+  - {match: '(willing|able|eligible) to (obtain|get|acquire).*clearance', answer: "Yes"}
+  - {match: ['(currently )?hold.*clearance', 'active.*clearance', 'current.*clearance'], answer: "No"}
+  - {match: 'authori[sz]ed to work|legally (authori[sz]ed|eligible)|eligib\w* to work', answer: "Yes"}
+  - {match: 'sponsor', answer: "No"}
+  - {match: 'relocat', answer: "Yes"}
+  - {match: '18 years|at least 18|over 18|of legal age', answer: "Yes"}
+  - {match: 'background (check|screen)', answer: "Yes"}
+  - {match: 'non-?compete|non-?solicit|restrictive covenant', answer: "No"}
+  - {match: '(previously|ever) (been )?(worked|employed)|former employee|worked (here|for us|at \w+) before', answer: "No"}
+  - {match: 'currently employed', answer: "Yes"}
+  - {match: 'salary|compensation expectation|desired (pay|compensation)|expected (pay|compensation)', answer: "65000"}
+  - {match: 'notice period', answer: "2 weeks"}
+  - {match: 'start date|when can you start|available to start|earliest start', answer: "2 weeks after offer"}
+  - {match: 'how did you hear|where did you (hear|find|learn)|referral source|^source', answer: "Company website"}
+  - {match: 'years of (professional |relevant )?experience|how many years', answer: "2"}
+  - {match: '(able|willing) to (work|commute).*(office|on-?site|hybrid)|in-?office', answer: "Yes"}
+  - {match: 'highest (level of )?education|^degree', answer: "Bachelor's Degree"}
+  - {match: '^school|university|college name', answer: "Your School"}
+  - {match: 'discipline|field of study|major', answer: "Your Major"}
+  # Voluntary self-identification (EEO). Use "Decline" / "I don't wish to answer" if you prefer.
+  - {match: 'hispanic|latino', answer: "Decline"}
+  - {match: '^gender|gender identity', answer: "Decline"}
+  - {match: '\brace\b|ethnicity', answer: "Decline"}
+  - {match: 'veteran', answer: "I don't wish to answer"}
+  - {match: 'disability', answer: "I don't wish to answer"}

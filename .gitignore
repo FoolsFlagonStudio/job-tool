@@ -1,0 +1,9 @@
+# personal files: never commit
+profile.yaml
+config.yaml
+urls.txt
+resumes/**/*.pdf
+data/
+__pycache__/
+*.pyc
+.venv/

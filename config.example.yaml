@@ -1,0 +1,115 @@
+# job-tool settings. Copy to config.yaml and edit. (config.yaml is git-ignored.)
+
+# How far back to look on company boards the first time (days). After that the
+# database remembers what it has seen, so old jobs never come back.
+lookback_days: 30
+
+# Where things live (relative to the repo folder).
+database: data/jobs.db
+urls_file: urls.txt          # paste any job links here, one per line; `find` picks them up
+resumes_dir: resumes          # your PDF variants go here (see resumes below)
+
+# ---------------- what counts as a match ----------------
+filters:
+  title_include: [engineer, developer, programmer, swe]
+  title_exclude: [senior, sr, staff, principal, lead, manager, director, head, vp, architect,
+    intern, internship, co-op, iii, iv, distinguished, fellow, mechanical, electrical, hardware,
+    firmware, rf, optical, chemical, civil, manufacturing, sales, recruit, technician, field,
+    quality, validation, analog, asic, fpga, silicon, thermal, structural]
+  # "Engineer" titles must also contain one of these (so "Process Engineer" is skipped)
+  engineer_needs_one_of: [software, 'full.?stack', 'front.?end', 'back.?end', web, application, platform,
+    api, data, cloud, devops, infrastructure, ui, ux, mobile, ios, android, java, python, react,
+    node, typescript, ai, ml, automation, integration, product, sde, swe]
+  titles_ok_without_signal: [developer, programmer, swe]
+  # Location: any of these words, or ", MA", or US remote
+  places: [boston, cambridge, somerville, brookline, newton, watertown, medford, malden, quincy,
+    everett, chelsea, waltham, burlington, woburn, lexington, needham, wellesley, bedford, dedham,
+    braintree, lynn, salem, framingham, natick, marlborough, lowell, andover, wilmington, billerica,
+    westborough, north reading, tewksbury, canton, norwood, maynard, chelmsford, acton, concord,
+    beverly, danvers, peabody, reading, massachusetts]
+  state_codes: [MA]
+  remote_us_ok: true
+  non_us_words: [canada, toronto, vancouver, uk, united kingdom, london, ireland, dublin, germany,
+    berlin, france, paris, spain, portugal, poland, india, bangalore, bengaluru, hyderabad,
+    singapore, japan, tokyo, australia, sydney, brazil, mexico, argentina, colombia, israel,
+    netherlands, amsterdam, emea, apac, latam, europe, philippines, romania, czech, sweden,
+    denmark, switzerland, china, korea]
+
+# ---------------- which resume to attach ----------------
+# At apply time the tool reads the posting text and scores each variant by how many of
+# its keywords appear. Highest score wins; ties and zero scores go to `default`.
+# Put the PDFs in resumes_dir. The file is uploaded as-is, so name them however you
+# like here; the upload keeps the file name, so Evan-Roberts-Resume.pdf style is safest.
+resumes:
+  default: fullstack
+  variants:
+    fullstack:
+      file: fullstack/Evan-Roberts-Resume.pdf
+      keywords: [full stack, full-stack, fullstack, end-to-end, end to end]
+    frontend:
+      file: frontend/Evan-Roberts-Resume.pdf
+      keywords: [frontend, front-end, front end, ui, ux, css, design system, figma, accessibility]
+    backend:
+      file: backend/Evan-Roberts-Resume.pdf
+      keywords: [backend, back-end, back end, api, microservices, distributed, database, sql, java, spring]
+    data:
+      file: data/Evan-Roberts-Resume.pdf
+      keywords: [data engineer, etl, pipeline, analytics, pandas, warehouse, spark, airflow, dbt]
+    healthcare:
+      file: healthcare/Evan-Roberts-Resume.pdf
+      keywords: [healthcare, health care, patient, clinical, hipaa, provider, clinic, medical]
+      weight: 2        # healthcare words count double, so health-tech companies get this one
+
+# ---------------- browser ----------------
+apply:
+  batch_size: 5             # how many applications to open and fill per run
+  browser: chrome           # chrome = your installed Google Chrome; chromium = Playwright's own
+  slow_mo_ms: 50            # small delay between actions so sites don't choke
+
+# ---------------- company boards ----------------
+# ats: greenhouse | lever | ashby | smartrecruiters | workday (workday needs feed:)
+# Add one with:  python -m jobtool check greenhouse <token>
+boards:
+  - {company: "CarGurus", ats: greenhouse, token: cargurus}
+  - {company: "PathAI", ats: greenhouse, token: pathai}
+  - {company: "SimpliSafe", ats: greenhouse, token: simplisafe}
+  - {company: "EverQuote", ats: greenhouse, token: everquote}
+  - {company: "Motional", ats: greenhouse, token: motional}
+  - {company: "Starburst", ats: greenhouse, token: starburst}
+  - {company: "Recorded Future", ats: greenhouse, token: recordedfuture}
+  - {company: "Ginkgo Bioworks", ats: greenhouse, token: ginkgobioworks}
+  - {company: "Lightmatter", ats: greenhouse, token: lightmatter}
+  - {company: "Cohere Health", ats: greenhouse, token: coherehealth}
+  - {company: "HubSpot", ats: greenhouse, token: hubspotjobs}
+  - {company: "Toast", ats: greenhouse, token: toast}
+  - {company: "Klaviyo", ats: greenhouse, token: klaviyo}
+  - {company: "Formlabs", ats: greenhouse, token: formlabs}
+  - {company: "Affirm", ats: greenhouse, token: affirm}
+  - {company: "WHOOP", ats: ashby, token: whoop}
+  - {company: "Commure", ats: ashby, token: commure}
+  - {company: "Datadog", ats: greenhouse, token: datadog}
+  - {company: "Kayak", ats: ashby, token: kayak}
+  - {company: "Tulip", ats: greenhouse, token: tulip}
+  - {company: "Benchling", ats: ashby, token: benchling}
+  - {company: "Suno", ats: ashby, token: suno}
+  - {company: "LogRocket", ats: lever, token: logrocket}
+  - {company: "Locus Robotics", ats: greenhouse, token: locusrobotics}
+  - {company: "Veracode", ats: greenhouse, token: veracode}
+  - {company: "Cambridge Mobile Telematics", ats: greenhouse, token: cambridgemobiletelematics}
+  - {company: "Paperless Parts", ats: greenhouse, token: paperlessparts}
+  - {company: "Rue La La", ats: greenhouse, token: ruelala}
+  - {company: "Snyk", ats: ashby, token: snyk}
+  - {company: "Abacus Insights", ats: greenhouse, token: abacusinsights}
+  - {company: "Hopper", ats: ashby, token: hopper}
+  - {company: "Asimov", ats: ashby, token: asimov}
+  - {company: "Zus Health", ats: lever, token: zushealth}
+  - {company: "Arcadia", ats: lever, token: arcadia}
+  - {company: "Markforged", ats: greenhouse, token: markforged}
+  - {company: "Vestmark", ats: greenhouse, token: vestmark}
+  - {company: "Wistia", ats: ashby, token: wistia}
+  - {company: "Mercury", ats: greenhouse, token: mercury}
+  - {company: "Ramp", ats: ashby, token: ramp}
+  - {company: "Twilio", ats: greenhouse, token: twilio}
+  - {company: "CircleCI", ats: greenhouse, token: circleci}
+  - {company: "Linear", ats: ashby, token: linear}
+  - {company: "Vercel", ats: greenhouse, token: vercel}
