@@ -56,6 +56,8 @@ python -m jobtool apply --count 10
 python -m jobtool apply --ids 12 15  # specific jobs
 python -m jobtool apply --marathon   # days off: keep 5 tabs filled, refilling as you submit or close each one
 python -m jobtool apply --marathon --count 3 --workday   # 3 tabs at a time, Workday jobs included
+python -m jobtool list --easy        # LinkedIn Easy Apply jobs only   (--forms for everything else)
+python -m jobtool apply --easy       # work through Easy Apply jobs, 5 tabs at a time
 python -m jobtool list --status filled --notes   # what each prefilled job still needs
 python -m jobtool applied           # what you've applied to since last time: date, company, title, link
 python -m jobtool applied --all     # every application
@@ -78,6 +80,17 @@ Excel. Each application shows up only once, so you never copy the same one twice
 and `--since 2026-11-01` limits it by date.
 
 Jobs you paste into `urls.txt` get their real job title from the posting page the first time `apply` opens them.
+
+### Recruiter outreach
+When a LinkedIn job page shows "Meet the hiring team" or a job poster, the tool saves that person's name and
+profile link. `list --notes` shows it, and `applied` puts it in a "Recruiter / who to contact" column.
+Jobs without one get a ready-made LinkedIn search link for "<company> technical recruiter" instead, so after
+applying you can open it and message someone. The tool never sends messages.
+
+### Blocked companies
+`filters: company_exclude:` in `config.yaml` lists companies to ignore everywhere: job-reposting sites
+(MeeBoss, RemoteHunter, Jobgether...), AI-training gig sites, and "training then placement" programs that
+bind you to a contract (BeaconFire, SynergisticIT, Revature...). Add or remove names as you run into them.
 
 ### Sign-ins
 The tool uses its own Chrome profile (`data/browser-profile`), **not** your everyday Chrome, so being logged in there doesn't count.
@@ -105,6 +118,15 @@ Check it with `python -m jobtool check <ats> <token>`.
   few days away. For each match it looks up the company's own application link, so `apply` can prefill it.
   Easy Apply-only jobs are marked `[EASY]` in `list`. `apply` skips them, so apply on LinkedIn and then
   `mark <id> submitted`. If LinkedIn throttles you (FAIL ... 429), wait an hour or raise `pause_seconds`.
+- **Easy Apply sessions**: `python -m jobtool apply --easy` opens the Easy Apply jobs 5 tabs at a time,
+  newest first. Sign in to LinkedIn in that window the first time; it stays signed in. You click Easy Apply
+  and submit. LinkedIn fills in most of it from your profile, and the tool never clicks anything on LinkedIn.
+  When LinkedIn shows "application was sent" or "Applied", the tool marks the job submitted, closes the tab
+  and opens the next one. Jobs you applied to before are skipped automatically. Upload your resume variants
+  to LinkedIn once (Settings > Data privacy > Job application settings) so you can pick one per job.
+- **Throttling (429)**: the tool now waits and retries, and if LinkedIn is still throttling it skips the rest
+  of the LinkedIn searches for that run and keeps what it found. Run `find --only linkedin` again an hour later.
+  Raise `pause_seconds` if it keeps happening.
 - **Built In Boston**: `find` opens the entry-level, junior and mid-level engineering listings in a hidden
   browser. During `apply` the tool clicks Built In's Apply button and fills the company's own form. If Built In
   starts showing a "verify you are human" page, set `sources: builtin: headless: false`.

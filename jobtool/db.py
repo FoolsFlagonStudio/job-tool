@@ -25,7 +25,7 @@ class DB:
         self.con.row_factory = sqlite3.Row
         self.con.executescript(SCHEMA)
         cols = {r["name"] for r in self.con.execute("PRAGMA table_info(jobs)")}
-        for col in ("submitted_at", "exported_at"):   # added later: upgrade older databases
+        for col in ("submitted_at", "exported_at", "recruiter"):   # added later: upgrade older databases
             if col not in cols:
                 self.con.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
         self.con.commit()

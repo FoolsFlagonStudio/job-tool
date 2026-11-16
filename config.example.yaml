@@ -12,10 +12,14 @@ resumes_dir: resumes          # your PDF variants go here (see resumes below)
 # ---------------- what counts as a match ----------------
 filters:
   title_include: [engineer, developer, programmer, swe]
+  # Companies to ignore everywhere: job reposting sites, AI-training gig sites, and "training then placement"
+  # programs that bind you to a contract. Matched as part of the company name, case-insensitive. Edit freely.
+  company_exclude: [MeeBoss, RemoteHunter, Jobgether, HiredBuddy, TalentHop, Joblet, AfterQuery, Lensa,
+                    BeaconFire, SynergisticIT, Revature, Smoothstack, mthree, Dice, Jooble, Talentify]
   title_exclude: [senior, sr, staff, principal, lead, manager, director, head, vp, architect,
     intern, internship, co-op, iii, iv, distinguished, fellow, mechanical, electrical, hardware,
     firmware, rf, optical, chemical, civil, manufacturing, sales, recruit, technician, field,
-    quality, validation, analog, asic, fpga, silicon, thermal, structural, avp, assistant vice president, vice president, 'training material', sap, salesforce, servicenow]
+    quality, validation, analog, asic, fpga, silicon, thermal, structural, avp, assistant vice president, vice president, 'training material', sap, salesforce, servicenow, ts/sci, polygraph, poly]
   # "Engineer" titles must also contain one of these (so "Process Engineer" is skipped)
   engineer_needs_one_of: [software, 'full.?stack', 'front.?end', 'back.?end', web, application, platform,
     api, data, cloud, devops, infrastructure, ui, ux, mobile, ios, android, java, python, react,
@@ -82,7 +86,8 @@ sources:
     past: day               # day | week | month  (use week on your first run or after a few days off)
     experience: [2, 3]      # 1 internship, 2 entry level, 3 associate, 4 mid-senior
     max_results_per_search: 100
-    pause_seconds: 2        # be gentle: LinkedIn throttles fast scrapers
+    pause_seconds: 5        # seconds between LinkedIn requests (plus a random extra). Raise to 8-10 if you see 429s
+    resolve_apply_links: true   # look up each job's company apply link (1 extra request per job)
     searches:
       - {keywords: "software engineer", location: "Boston, Massachusetts, United States", distance: 25}
       - {keywords: "full stack engineer", location: "Boston, Massachusetts, United States", distance: 25}

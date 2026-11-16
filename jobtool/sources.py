@@ -7,6 +7,7 @@ import random
 import re
 import time
 import urllib.parse
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 
@@ -16,11 +17,25 @@ BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/131.0 Safari/537.36")
 
 
-def get_html(url, timeout=25):
+class Throttled(Exception):
+    pass
+
+
+def get_html(url, timeout=25, backoff=(30, 90)):
+    """GET a page. On HTTP 429 wait and retry (30s, then 90s); still throttled -> Throttled."""
     req = urllib.request.Request(url, headers={"User-Agent": BROWSER_UA, "Accept": "text/html",
                                                "Accept-Language": "en-US,en;q=0.9"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", "replace")
+    for wait in (*backoff, None):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read().decode("utf-8", "replace")
+        except urllib.error.HTTPError as e:
+            if e.code != 429:
+                raise
+            if wait is None:
+                raise Throttled("HTTP 429 after waiting")
+            print(f"     ...LinkedIn says slow down, waiting {wait}s")
+            time.sleep(wait)
 
 
 def text(s):
@@ -39,8 +54,12 @@ def linkedin(cfg, seen, log=print):
         return []
     flt = Filters(cfg)
     found, ids = [], set()
-    pause = sc.get("pause_seconds", 2)
+    pause = sc.get("pause_seconds", 5)
+    throttled = False
     for s in sc.get("searches", []):
+        if throttled:
+            log(f"SKIP LinkedIn '{s['keywords']}': throttled earlier this run")
+            continue
         params = {"keywords": s["keywords"], "location": s.get("location", "Boston, Massachusetts, United States"),
                   "f_TPR": PAST.get(s.get("past", sc.get("past", "day")), "r86400"), "sortBy": "DD"}
         if s.get("distance"):
@@ -71,7 +90,8 @@ def linkedin(cfg, seen, log=print):
                     posted = (re.search(r'datetime="([\d-]+)"', c) or [None, None])[1]
                     if s.get("remote") and "remote" not in loc.lower():
                         loc = (loc + " (Remote)").strip()
-                    if not flt.title_ok(title) or not flt.location_ok(loc, bool(s.get("remote"))):
+                    if not flt.company_ok(company) or not flt.title_ok(title) or \
+                            not flt.location_ok(loc, bool(s.get("remote"))):
                         continue
                     found.append({"key": f"li:{jid}", "alt_keys": [], "company": company, "title": title,
                                   "location": loc, "url": f"https://www.linkedin.com/jobs/view/{jid}/",
@@ -79,11 +99,24 @@ def linkedin(cfg, seen, log=print):
                     kept += 1
                 time.sleep(pause + random.random())
             log(f"OK   LinkedIn '{s['keywords']}'{' remote' if s.get('remote') else ''}: {total} listed, {kept} new")
+            time.sleep(pause * 2 + random.random() * pause)   # extra gap between searches
+        except Throttled:
+            throttled = True
+            log(f"FAIL LinkedIn '{s['keywords']}': still throttled after waiting. Skipping the rest this run; "
+                "the jobs found so far are kept. Try again in an hour.")
         except Exception as e:
             log(f"FAIL LinkedIn '{s['keywords']}': {type(e).__name__}: {str(e)[:90]}"
                 + (" (LinkedIn is throttling, try again later)" if "429" in str(e) else ""))
-    # find where each job is really applied to (company site) so it can be prefilled
-    for j in found:
+    # find where each job is really applied to (company site) so it can be prefilled.
+    # This is one extra request per job, so it stops at the first sign of throttling.
+    if not sc.get("resolve_apply_links", True):
+        for j in found:
+            j["ats"] = "linkedin"
+        return found
+    for n, j in enumerate(found):
+        if throttled:
+            j["ats"] = "linkedin"      # still applyable: apply opens the LinkedIn page and clicks Apply
+            continue
         try:
             page = get_html(LI_POSTING.format(j["key"][3:]))
             m = re.search(r'id="applyUrl"[^>]*>\s*<!--\s*"?([^"<]+)"?\s*-->', page)
@@ -96,7 +129,12 @@ def linkedin(cfg, seen, log=print):
                     j["ats"] = ats_from_url(real)
             else:
                 j["ats"] = "linkedin_easy"   # Easy Apply only: you apply on LinkedIn yourself
-            time.sleep(pause / 2 + random.random())
+            time.sleep(pause / 2 + random.random() * 2)
+        except Throttled:
+            throttled = True
+            j["ats"] = "linkedin"
+            log(f"     LinkedIn throttled while checking apply links ({n} of {len(found)} done); "
+                "the rest will be resolved when you apply")
         except Exception:
             pass
     return found
@@ -173,7 +211,7 @@ def builtin(cfg, seen, days, base_dir, log=print):
                         age = _bi_age_days(r["posted"])
                         if age is not None and age > days:
                             continue
-                        if not flt.title_ok(r["title"]):
+                        if not flt.title_ok(r["title"]) or not flt.company_ok(r["company"]):
                             continue
                         loc = r["location"] or "Boston, MA"
                         if not flt.location_ok(loc, "remote" in loc.lower()):

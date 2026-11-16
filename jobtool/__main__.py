@@ -6,6 +6,7 @@
   python -m jobtool apply [--count 5]    # open and prefill the next N, you review and submit
   python -m jobtool apply --ids 12 15    # prefill specific jobs
   python -m jobtool apply --marathon     # keep 5 tabs filled, opening the next as you submit or close one
+  python -m jobtool apply --easy         # LinkedIn Easy Apply jobs: opens them 5 at a time, you click Easy Apply
   python -m jobtool applied             # applications not yet copied to your tracker (then marks them copied)
   python -m jobtool applied --all       # every application, including ones already copied
   python -m jobtool mark 12 submitted    # fix a status by hand (new, filled, submitted, skipped, needs_you, closed)
@@ -89,7 +90,13 @@ def cmd_find(args, cfg, db):
 
 
 def cmd_list(args, cfg, db):
-    rows = db.jobs(status=args.status, limit=args.limit)
+    is_blocked = blocked(cfg)
+    rows = [r for r in db.jobs(status=args.status) if not is_blocked(r)]
+    if args.easy:
+        rows = [r for r in rows if r["ats"] == "linkedin_easy"]
+    elif args.forms:
+        rows = [r for r in rows if r["ats"] != "linkedin_easy"]
+    rows = rows[:args.limit]
     if not rows:
         print("Nothing here.")
         return
@@ -100,17 +107,34 @@ def cmd_list(args, cfg, db):
               f"{(r['company'] or '')[:22]:<22} {(r['title'] or '')[:52]:<52} {loc}")
         if args.notes and r["notes"]:
             print(f"      {r['notes']}")
+        if args.notes and r["recruiter"]:
+            print(f"      Recruiter: {r['recruiter']}")
     print(f"\n{len(rows)} shown.")
+
+
+def blocked(cfg):
+    flt = B.Filters(cfg)
+    return lambda r: not flt.company_ok(r["company"])
 
 
 def cmd_apply(args, cfg, db):
     from . import fill
+    is_blocked = blocked(cfg)
+    if args.easy:
+        jobs = db.jobs(ids=args.ids) if args.ids else \
+            [j for j in db.jobs(status="new") if j["ats"] == "linkedin_easy" and not is_blocked(j)]
+        if not jobs:
+            print("No Easy Apply jobs waiting. Run `python -m jobtool find` first.")
+            return
+        print(f"{len(jobs)} Easy Apply job(s), opening {args.count or 5} at a time...")
+        fill.run_easy(db, cfg, BASE, jobs, keep_open=args.count or 5)
+        return
     profile = load_yaml("profile.yaml")
     if args.ids:
         jobs = db.jobs(ids=args.ids)
     else:
         skip = {"linkedin_easy"} | (set() if args.workday else {"workday"})
-        jobs = [j for j in db.jobs(status="new") if j["ats"] not in skip]
+        jobs = [j for j in db.jobs(status="new") if j["ats"] not in skip and not is_blocked(j)]
         if not args.marathon:
             jobs = jobs[:args.count or cfg["apply"]["batch_size"]]
     if not jobs:
@@ -128,10 +152,20 @@ def cmd_applied(args, cfg, db):
         print("No new applications to copy over." if not args.all else "No submitted applications yet.")
         return
     out = BASE / "applied.csv"
+    if out.exists() and "Recruiter" not in out.read_text(encoding="utf-8").split("\n", 1)[0]:
+        out.rename(BASE / "applied-old.csv")      # older layout without the recruiter column
     new_file = not out.exists()
-    header = ["Date applied", "Company", "Job title", "Location", "Link", "Resume"]
+    from urllib.parse import quote
+    header = ["Date applied", "Company", "Job title", "Location", "Link", "Resume", "Recruiter / who to contact"]
+
+    def contact(r):
+        if r["recruiter"]:
+            return r["recruiter"]
+        return ("Search: https://www.linkedin.com/search/results/people/?keywords="
+                + quote(f'{r["company"]} technical recruiter'))
     lines = [[r["submitted_at"] or r["updated"], r["company"], r["title"], r["location"] or "",
-              r["url"], r["resume"] or ""] for r in rows]
+              r["url"], r["resume"] or ("LinkedIn profile" if r["ats"] == "linkedin_easy" else ""), contact(r)]
+             for r in rows]
     print("\t".join(header))
     for l in lines:
         print("\t".join(l))
@@ -167,10 +201,13 @@ def main():
     f.add_argument("--only", nargs="+", choices=["boards", "builtin", "linkedin", "urls"])
     l = sub.add_parser("list"); l.add_argument("--status", choices=STATUSES); l.add_argument("--limit", type=int, default=60)
     l.add_argument("--notes", action="store_true", help="show what each filled job still needs")
+    l.add_argument("--easy", action="store_true", help="only LinkedIn Easy Apply jobs")
+    l.add_argument("--forms", action="store_true", help="only jobs with a real application form")
     a = sub.add_parser("apply"); a.add_argument("--count", type=int); a.add_argument("--ids", type=int, nargs="+")
     a.add_argument("--marathon", action="store_true",
                    help="work through the whole queue, keeping --count tabs filled at a time")
     a.add_argument("--workday", action="store_true", help="include Workday jobs (each site needs an account)")
+    a.add_argument("--easy", action="store_true", help="LinkedIn Easy Apply jobs only (you click Easy Apply)")
     a.add_argument("--headless", action="store_true", help="testing only: no visible browser")
     a.add_argument("--no-watch", action="store_true", help="don't wait for you to submit")
     ap_ = sub.add_parser("applied"); ap_.add_argument("--all", action="store_true")

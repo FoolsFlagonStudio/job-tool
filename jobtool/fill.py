@@ -377,6 +377,13 @@ def prepare(ctx, db, cfg, rules, base_dir, job, log):
     page = ctx.new_page()
     page.set_default_timeout(5000)            # never hang 30s on one field while you're typing
     try:
+        if "linkedin.com" in (job["url"] or ""):
+            try:
+                page.goto(job["url"], wait_until="domcontentloaded", timeout=45000)
+                page.wait_for_timeout(2000)
+                save_recruiter(db, dict(job), page)
+            except Exception:
+                pass
         open_application(page, job["url"], job["ats"])
         text = page.inner_text("body")[:20000]
         if CLOSED_RE.search(text[:4000]):
@@ -476,3 +483,117 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True,
             ctx.close()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------- LinkedIn Easy Apply sessions
+# The tool only opens each job page. You click Easy Apply and submit yourself (LinkedIn prefills
+# most of it from your profile). It never clicks anything on LinkedIn for you.
+EASY_DONE_RE = re.compile(r"your application was sent|application submitted|\bapplied \d+ (second|minute|hour|day|week|month)s? ago|"
+                          r"\bapplied (just now|today)|you applied", re.I)
+LOGIN_WALL_RE = re.compile(r"sign in to (apply|see|view)|join (now )?to (apply|see)|agree & join", re.I)
+
+HIRING_TEAM_JS = r"""() => {
+  const out = [];
+  const heads = [...document.querySelectorAll('h2, h3, span, div')]
+    .filter(e => /meet the hiring team|people you can reach out to|job poster/i.test(e.innerText || '') && (e.innerText || '').length < 60);
+  for (const h of heads) {
+    let box = h; for (let i = 0; i < 5 && box.parentElement; i++) box = box.parentElement;
+    box.querySelectorAll('a[href*="/in/"]').forEach(a => {
+      const url = a.href.split('?')[0];
+      const name = (a.innerText || a.getAttribute('aria-label') || '').trim().split('\n')[0];
+      if (!out.some(o => o.url === url)) out.push({name, url});
+    });
+    if (out.length) break;
+  }
+  return out.slice(0, 3);
+}"""
+
+
+def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print):
+    from playwright.sync_api import sync_playwright
+    ac = cfg.get("apply", {})
+    queue = list(jobs)
+    with sync_playwright() as pw:
+        kwargs = dict(headless=False, viewport={"width": 1280, "height": 900})
+        if ac.get("browser", "chrome") == "chrome":
+            kwargs["channel"] = "chrome"
+        ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"), **kwargs)
+        open_pages, warned = {}, False
+
+        def open_next():
+            nonlocal warned
+            while queue and len(open_pages) < keep_open:
+                job = queue.pop(0)
+                pg = ctx.new_page()
+                pg.set_default_timeout(8000)
+                try:
+                    pg.goto(job["url"], wait_until="domcontentloaded", timeout=45000)
+                    pg.wait_for_timeout(2500)
+                    body = pg.evaluate("() => (document.body && document.body.innerText || '').slice(0, 8000)")
+                except Exception as e:
+                    log(f"[{job['id']}] could not open: {type(e).__name__}")
+                    pg.close()
+                    continue
+                if EASY_DONE_RE.search(body):
+                    db.set(job["id"], status="submitted", notes="Already applied on LinkedIn")
+                    log(f"[{job['id']}] already applied - skipped")
+                    pg.close()
+                    continue
+                if re.search(r"no longer accepting applications", body, re.I):
+                    db.set(job["id"], status="closed")
+                    log(f"[{job['id']}] closed - skipped")
+                    pg.close()
+                    continue
+                if LOGIN_WALL_RE.search(body) and not warned:
+                    warned = True
+                    log("\n  ** Sign in to LinkedIn in this window once (the tool remembers it), then reload the tab. **\n")
+                save_recruiter(db, job, pg)
+                open_pages[job["id"]] = (job, pg)
+                log(f"[{job['id']}] {job['company']} - {job['title']}")
+
+        open_next()
+        log(f"\nClick Easy Apply in each tab and submit. I mark each one when LinkedIn confirms it, and open the next."
+            f" Close a tab to skip a job. {len(queue)} more in the queue. Ctrl+C or close the browser to stop.\n")
+        try:
+            while open_pages:
+                changed = False
+                for jid, (job, pg) in list(open_pages.items()):
+                    if pg.is_closed():
+                        del open_pages[jid]
+                        changed = True
+                        continue
+                    try:
+                        body = pg.evaluate("() => (document.body && document.body.innerText || '').slice(0, 8000)")
+                    except Exception:
+                        continue
+                    if not job.get("_rec"):
+                        save_recruiter(db, job, pg)
+                    if EASY_DONE_RE.search(body):
+                        db.set(jid, status="submitted")
+                        log(f"[{jid}] submitted  ({len(queue)} left in queue)")
+                        del open_pages[jid]
+                        changed = True
+                        pg.wait_for_timeout(1500)
+                        pg.close()
+                if changed:
+                    open_next()
+                time.sleep(3)
+        except KeyboardInterrupt:
+            pass
+        except Exception:
+            pass
+        try:
+            ctx.close()
+        except Exception:
+            pass
+
+
+def save_recruiter(db, job, pg):
+    """If the job page shows a hiring team / job poster, save their LinkedIn profile links."""
+    try:
+        people = pg.evaluate(HIRING_TEAM_JS)
+    except Exception:
+        people = []
+    if people:
+        job["_rec"] = True
+        db.set(job["id"], recruiter="; ".join(f"{p['name']} {p['url']}".strip() for p in people))

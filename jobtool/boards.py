@@ -25,7 +25,7 @@ def fetch(url, data=None, timeout=30):
         except urllib.error.HTTPError as e:
             last = e
             if e.code == 429:              # rate limited: back off and try again
-                time.sleep(5 * (attempt + 1))
+                time.sleep(int(e.headers.get("Retry-After") or 0) or 10 * (attempt + 1))
                 continue
             if e.code in (400, 401, 403, 404) or attempt >= 1:
                 raise
@@ -126,6 +126,7 @@ def workday(b):
                        "posted": (now - timedelta(days=days)).isoformat() if days is not None else None,
                        "ats": "workday"}
             offset += 20
+            time.sleep(0.7)
             if len(posts) < 20:
                 break
 
@@ -151,6 +152,11 @@ class Filters:
         self.state = re.compile(r",\s*(%s)\b" % "|".join(f.get("state_codes", ["MA"])))
         self.remote_ok = f.get("remote_us_ok", True)
         self.non_us = _words(f.get("non_us_words", []))
+        bad = f.get("company_exclude", [])
+        self.company_out = re.compile("|".join(re.escape(c) for c in bad), re.I) if bad else None
+
+    def company_ok(self, c):
+        return not (self.company_out and self.company_out.search(c or ""))
 
     def title_ok(self, t):
         t = t or ""
@@ -186,15 +192,17 @@ def scan(boards, cfg, seen, days, log=print):
         except Exception as e:
             return b, None, f"{type(e).__name__}: {str(e)[:100]}"
 
-    # Workday sites share servers and rate-limit, so they get fewer parallel slots
+    # Workday sites share servers and rate-limit, so they are read one at a time
     wd = [b for b in boards if str(b.get("ats", "")).lower() == "workday"]
     other = [b for b in boards if b not in wd]
-    with ThreadPoolExecutor(12) as ex1, ThreadPoolExecutor(3) as ex2:
+    with ThreadPoolExecutor(12) as ex1, ThreadPoolExecutor(1) as ex2:
         futures = [ex1.submit(pull, b) for b in other] + [ex2.submit(pull, b) for b in wd]
         results = [f.result() for f in futures]
 
     for b, listing, err in results:
         name = b.get("company") or b.get("token")
+        if not flt.company_ok(name):
+            continue
         if err:
             log(f"FAIL {name}: {err}")
             continue
