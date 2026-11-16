@@ -273,7 +273,7 @@ def builtin(cfg, seen, days, base_dir, log=print):
 
 def ats_from_url(url):
     host = re.sub(r"^https?://", "", url or "").split("/")[0].lower()
-    for key, ats in (("greenhouse", "greenhouse"), ("lever.co", "lever"), ("ashbyhq", "ashby"),
+    for key, ats in (("greenhouse", "greenhouse"), ("lever.co", "lever"), ("ashbyhq", "ashby"), ("workable", "workable"), ("recruitee", "recruitee"), ("rippling", "rippling"),
                      ("myworkdayjobs", "workday"), ("smartrecruiters", "smartrecruiters"),
                      ("linkedin.com", "linkedin"), ("builtin", "builtin")):
         if key in host:

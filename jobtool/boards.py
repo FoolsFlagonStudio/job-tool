@@ -58,15 +58,27 @@ def parse_dt(v):
         return None
 
 
-# ---------- feed readers: each yields dicts with key, title, location, remote, url, posted ----------
+# ---------- feed readers: each yields dicts with key, title, location, remote, url, posted,
+# and (where the feed has it) description, which is used for the remote check, years and salary notes ----------
+
+def strip_html(s):
+    import html as _h
+    s = _h.unescape(s or "")
+    s = re.sub(r"<(br|/p|/li|/h\d)[^>]*>", "\n", s, flags=re.I)
+    s = _h.unescape(re.sub(r"<[^>]+>", " ", s))
+    s = re.sub(r"[ \t\xa0]+", " ", s)
+    return re.sub(r"\n\s*\n+", "\n", s).strip()
+
 
 def greenhouse(b):
     url = b.get("feed") or f"https://boards-api.greenhouse.io/v1/boards/{b['token']}/jobs"
+    url += ("&" if "?" in url else "?") + "content=true"
     for j in fetch(url).get("jobs", []):
+        locs = [(j.get("location") or {}).get("name", "")] + [o.get("name", "") for o in (j.get("offices") or [])]
         yield {"key": f"gh:{b['token']}:{j['id']}", "title": j.get("title", ""),
-               "location": (j.get("location") or {}).get("name", ""), "remote": False,
+               "location": "; ".join(x for x in dict.fromkeys(locs) if x), "remote": False,
                "url": j.get("absolute_url"), "posted": j.get("first_published") or j.get("updated_at"),
-               "ats": "greenhouse"}
+               "ats": "greenhouse", "description": strip_html(j.get("content", ""))}
 
 
 def lever(b):
@@ -77,11 +89,13 @@ def lever(b):
         yield {"key": f"lv:{b['token']}:{j['id']}", "title": j.get("text", ""),
                "location": "; ".join(x for x in locs if x),
                "remote": j.get("workplaceType") == "remote", "url": j.get("hostedUrl"),
-               "posted": j.get("createdAt"), "ats": "lever"}
+               "posted": j.get("createdAt"), "ats": "lever",
+               "description": (j.get("descriptionPlain") or "") + "\n" + (j.get("additionalPlain") or ""),
+               "comp": (lambda sr: f"${sr['min']:,}-${sr.get('max', 0):,}" if sr.get("min") else "")(j.get("salaryRange") or {})}
 
 
 def ashby(b):
-    url = b.get("feed") or f"https://api.ashbyhq.com/posting-api/job-board/{b['token']}"
+    url = b.get("feed") or f"https://api.ashbyhq.com/posting-api/job-board/{b['token']}?includeCompensation=true"
     for j in fetch(url).get("jobs", []):
         if j.get("isListed") is False:
             continue
@@ -89,8 +103,10 @@ def ashby(b):
         country = (((j.get("address") or {}).get("postalAddress") or {}).get("addressCountry") or "")
         loc = "; ".join(x for x in locs if x) + (f" ({country})" if country else "")
         yield {"key": f"ab:{b['token']}:{j['id']}", "title": j.get("title", ""), "location": loc,
-               "remote": j.get("workplaceType") == "Remote", "url": j.get("jobUrl"),
-               "posted": j.get("publishedAt"), "ats": "ashby"}
+               "remote": j.get("workplaceType") == "Remote" or bool(j.get("isRemote")), "url": j.get("jobUrl"),
+               "posted": j.get("publishedAt"), "ats": "ashby",
+               "description": j.get("descriptionPlain") or strip_html(j.get("descriptionHtml", "")),
+               "comp": ((j.get("compensation") or {}).get("compensationTierSummary") or "")}
 
 
 def smartrecruiters(b):
@@ -162,8 +178,64 @@ def workday(b):
                 break
 
 
-READERS = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby,
-           "smartrecruiters": smartrecruiters, "workday": workday}
+# The next three follow Steve's job-feed (github.com/Passarellism/job-feed), which reads them daily.
+def workable(b):
+    d = fetch(b.get("feed") or f"https://apply.workable.com/api/v1/widget/accounts/{b['token']}?details=true")
+    for j in d.get("jobs", []):
+        locs = [", ".join(x for x in [j.get("city"), j.get("state"), j.get("country")] if x)]
+        locs += [", ".join(x for x in [l.get("city"), l.get("region"), l.get("country")] if x)
+                 for l in (j.get("locations") or [])]
+        jid = j.get("shortcode") or j.get("id")
+        yield {"key": f"wk:{b['token']}:{jid}", "title": j.get("title", ""),
+               "location": "; ".join(x for x in dict.fromkeys(locs) if x), "remote": bool(j.get("telecommuting")),
+               "url": j.get("url") or j.get("shortlink") or f"https://apply.workable.com/{b['token']}/j/{jid}/",
+               "posted": j.get("published_on") or j.get("created_at"), "ats": "workable",
+               "description": strip_html(j.get("description", ""))}
+
+
+def recruitee(b):
+    d = fetch(b.get("feed") or f"https://{b['token']}.recruitee.com/api/offers/")
+    for j in d.get("offers", []):
+        yield {"key": f"rc:{b['token']}:{j.get('id')}", "title": j.get("title", ""),
+               "location": j.get("location", "") or "", "remote": bool(j.get("remote")),
+               "url": j.get("careers_url"), "posted": j.get("published_at") or j.get("created_at"),
+               "ats": "recruitee", "description": strip_html(j.get("description", ""))}
+
+
+def rippling(b):
+    d = fetch(b.get("feed") or f"https://ats.rippling.com/api/v2/board/{b['token']}/jobs")
+    items = d if isinstance(d, list) else (d.get("items") or d.get("results") or d.get("jobs") or [])
+    for j in items:
+        locs = j.get("locations") or j.get("workLocations") or []
+        loc = "; ".join((l.get("name") if isinstance(l, dict) else str(l)) for l in locs) or str(j.get("location") or "")
+        jid = j.get("id") or j.get("uuid")
+        yield {"key": f"rp:{b['token']}:{jid}", "title": j.get("name") or j.get("title") or "",
+               "location": loc, "remote": "remote" in loc.lower(),
+               "url": j.get("url") or f"https://ats.rippling.com/{b['token']}/jobs/{jid}",
+               "posted": j.get("createdOn") or j.get("created_at"), "ats": "rippling",
+               "description": strip_html(j.get("description", ""))}
+
+
+READERS = {"greenhouse": greenhouse, "lever": lever, "ashby": ashby, "smartrecruiters": smartrecruiters,
+           "workday": workday, "workable": workable, "recruitee": recruitee, "rippling": rippling}
+
+# ---------- notes from the description: information only, never used to drop a job ----------
+YEARS_RE = re.compile(r"(\d{1,2})\s*\+?\s*(?:-|–|to)?\s*(?:\d{1,2}\s*)?\+?\s*years?", re.I)
+COMP_RE = re.compile(r"\$\s?\d{2,3}(?:,\d{3})+(?:\s*(?:-|–|to)\s*\$\s?\d{2,3}(?:,\d{3})+)?|\$\s?\d{2,3}\s?[kK](?:\s*(?:-|–|to)\s*\$\s?\d{2,3}\s?[kK])?")
+
+
+def info_notes(j):
+    d = j.get("description") or ""
+    notes = []
+    ys = [int(m.group(1)) for m in YEARS_RE.finditer(d) if 0 < int(m.group(1)) <= 15]
+    if ys and min(ys) >= 3:
+        notes.append(f"asks {min(ys)}+ yrs")
+    comp = j.get("comp") or (COMP_RE.search(d).group(0) if COMP_RE.search(d) else "")
+    if comp:
+        notes.append(f"pay {comp.strip()}")
+    if re.search(r"active (ts|top secret|secret)|ts/sci", d, re.I):
+        notes.append("mentions active clearance")
+    return " | ".join(notes)
 
 
 # ---------- filters, built from config.yaml ----------
@@ -269,6 +341,12 @@ def scan(boards, cfg, seen, days, log=print):
                 dt = parse_dt(j["posted"])
                 if dt and dt < cutoff:
                     continue
+                if j.get("description") and not (flt.places.search(j["location"] or "") or flt.state.search(j["location"] or "")):
+                    from .sources import remote_conflict      # kept only because it's remote: verify that
+                    if remote_conflict(j["description"], flt):
+                        continue
+                j["notes"] = info_notes(j)
+                j.pop("description", None)
                 j["company"] = name
                 j["posted"] = dt.date().isoformat() if dt else None
                 # the same title posted for several offices becomes one job

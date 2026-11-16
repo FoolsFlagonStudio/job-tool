@@ -35,7 +35,7 @@ def load_yaml(name):
 
 def ats_from_url(url):
     host = re.sub(r"^https?://", "", url).split("/")[0].lower()
-    for key, ats in (("greenhouse", "greenhouse"), ("lever.co", "lever"), ("ashbyhq", "ashby"),
+    for key, ats in (("greenhouse", "greenhouse"), ("lever.co", "lever"), ("ashbyhq", "ashby"), ("workable", "workable"), ("recruitee", "recruitee"), ("rippling", "rippling"),
                      ("myworkdayjobs", "workday"), ("smartrecruiters", "smartrecruiters")):
         if key in host:
             return ats
@@ -120,6 +120,8 @@ def cmd_list(args, cfg, db):
         tag = {"linkedin_easy": "[EASY] ", "workday": "[WD] ", "builtin": "[BI] ", "linkedin": "[LI] "}.get(r["ats"], "")
         print(f"{r['id']:>4}  {r['status']:<10} {r['posted'] or r['first_seen']}  {tag}"
               f"{(r['company'] or '')[:22]:<22} {(r['title'] or '')[:52]:<52} {loc}")
+        if not args.notes and r["status"] == "new" and r["notes"]:
+            print(f"      {r['notes']}")
         if args.notes and r["notes"]:
             print(f"      {r['notes']}")
         if args.notes and r["recruiter"]:

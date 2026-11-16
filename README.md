@@ -70,6 +70,12 @@ During `apply`, each job gets its own tab, and the terminal prints `READY` when 
 Wait for READY before typing in that tab, so you and the filler aren't typing in the same tab at once. Fix anything outlined in red, answer the essay questions, check the
 resume, and click Submit. Close the browser when you're done.
 
+### Notes under each job
+For boards whose feed includes the job description (Greenhouse, Lever, Ashby, Workable, Recruitee,
+Rippling), `list` shows a short line under new jobs, e.g. `asks 3+ yrs | pay $116,000`. These notes are for
+information only and never hide a job. The description is also used to drop "remote" jobs that turn out to be
+on-site, hybrid or relocating outside your area, the same check LinkedIn jobs get.
+
 ### Tracking what you applied to
 When a confirmation page appears after you click Submit, the tool marks that job submitted and saves the date.
 If it misses one, run `python -m jobtool mark <id> submitted`.
@@ -108,7 +114,10 @@ Find the company's careers page and look at the job links:
 | `job-boards.greenhouse.io/acme/...` | `{company: Acme, ats: greenhouse, token: acme}` |
 | `jobs.lever.co/acme/...` | `{company: Acme, ats: lever, token: acme}` |
 | `jobs.ashbyhq.com/acme/...` | `{company: Acme, ats: ashby, token: acme}` |
-| `acme.wd5.myworkdayjobs.com/External` | `{company: Acme, ats: workday, token: "acme/wd5/External"}` |
+| `acme.wd5.myworkdayjobs.com/External` | `{company: Acme, ats: workday, token: acme, feed: "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/jobs"}` |
+| `apply.workable.com/acme/...` | `{company: Acme, ats: workable, token: acme}` |
+| `acme.recruitee.com/...` | `{company: Acme, ats: recruitee, token: acme}` |
+| `ats.rippling.com/acme/jobs/...` | `{company: Acme, ats: rippling, token: acme}` |
 
 Check it with `python -m jobtool check <ats> <token>`.
 
