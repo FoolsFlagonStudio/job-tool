@@ -2,6 +2,7 @@
 
 # How far back to look on company boards the first time (days). After that the
 # database remembers what it has seen, so old jobs never come back.
+workday_every_hours: 6       # Workday rate-limits hard; check those companies at most this often
 lookback_days: 30
 
 # Where things live (relative to the repo folder).

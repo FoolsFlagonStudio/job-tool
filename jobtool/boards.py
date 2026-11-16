@@ -5,13 +5,15 @@ import re
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+import os
+import sys
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime, timedelta, timezone
 
 UA = {"User-Agent": "Mozilla/5.0 (job-tool)", "Accept": "application/json"}
 
 
-def fetch(url, data=None, timeout=30):
+def fetch(url, data=None, timeout=30, retry_429=True):
     body = json.dumps(data).encode() if data is not None else None
     headers = dict(UA)
     if body is not None:
@@ -24,8 +26,14 @@ def fetch(url, data=None, timeout=30):
                 return json.loads(r.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as e:
             last = e
+            if e.code == 429 and not retry_429:
+                raise
             if e.code == 429:              # rate limited: back off and try again
-                time.sleep(int(e.headers.get("Retry-After") or 0) or 10 * (attempt + 1))
+                try:
+                    ra = int(e.headers.get("Retry-After") or 0)
+                except ValueError:
+                    ra = 0
+                time.sleep(min(ra or 10 * (attempt + 1), 30))   # never wait more than 30s
                 continue
             if e.code in (400, 401, 403, 404) or attempt >= 1:
                 raise
@@ -102,16 +110,39 @@ def smartrecruiters(b):
             break
 
 
+WORKDAY_429 = {"streak": 0, "gave_up": False}   # Workday limits by IP across ALL its companies; back off as a group
+
+
 def workday(b):
     """feed = https://<tenant>.wdN.myworkdayjobs.com/wday/cxs/<tenant>/<site>/jobs"""
+    if WORKDAY_429["streak"] >= 3:
+        WORKDAY_429["gave_up"] = True
+        raise RuntimeError("SKIP: Workday is rate limiting, will check again next run")
     feed = b["feed"]
     site_root = feed.split("/wday/cxs/")[0]
     site = feed.rstrip("/").split("/")[-2]
     now = datetime.now(timezone.utc)
+    started = time.time()
     for search in ("software engineer", "developer"):
         offset = 0
-        while offset < 200:
-            d = fetch(feed, {"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": search})
+        while offset < 100 and time.time() - started < 40:   # whole company capped at ~40s
+            try:
+                d = fetch(feed, {"appliedFacets": {}, "limit": 20, "offset": offset, "searchText": search},
+                          timeout=20, retry_429=False)
+            except urllib.error.HTTPError as e:
+                if e.code != 429:
+                    raise
+                if offset + (search == "developer") > 0:
+                    return          # rate limited part-way: keep what we already have
+                time.sleep(8)       # first page: one polite retry
+                try:
+                    d = fetch(feed, {"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": search},
+                              timeout=20, retry_429=False)
+                except urllib.error.HTTPError as e2:
+                    if e2.code == 429:
+                        WORKDAY_429["streak"] += 1
+                    raise
+            WORKDAY_429["streak"] = 0
             posts = d.get("jobPostings", [])
             for j in posts:
                 p = (j.get("postedOn") or "").lower()
@@ -192,19 +223,40 @@ def scan(boards, cfg, seen, days, log=print):
         except Exception as e:
             return b, None, f"{type(e).__name__}: {str(e)[:100]}"
 
-    # Workday sites share servers and rate-limit, so they are read one at a time
+    # Workday rate-limits per company: a few at a time, and a limited company is skipped, not waited on
     wd = [b for b in boards if str(b.get("ats", "")).lower() == "workday"]
     other = [b for b in boards if b not in wd]
-    with ThreadPoolExecutor(12) as ex1, ThreadPoolExecutor(1) as ex2:
-        futures = [ex1.submit(pull, b) for b in other] + [ex2.submit(pull, b) for b in wd]
-        results = [f.result() for f in futures]
+    log(f"Checking {len(boards)} company boards ({len(wd)} on Workday)...")
+    ex1, ex2 = ThreadPoolExecutor(12), ThreadPoolExecutor(4)
+    futures = {ex1.submit(pull, b): b for b in other}
+    futures.update({ex2.submit(pull, b): b for b in wd})
+    results, pending, last_note = [], set(futures), time.time()
+    try:
+        while pending:   # short waits so Ctrl+C works, and a progress line so it never looks frozen
+            done, pending = wait(pending, timeout=1, return_when=FIRST_COMPLETED)
+            results += [f.result() for f in done]
+            if time.time() - last_note > 20 and pending:
+                names = ", ".join((futures[f].get("company") or "?") for f in list(pending)[:3])
+                log(f"     ...{len(results)}/{len(boards)} boards done, still waiting on: {names}")
+                last_note = time.time()
+    except KeyboardInterrupt:
+        log("\nStopped.")
+        ex1.shutdown(wait=False, cancel_futures=True)
+        ex2.shutdown(wait=False, cancel_futures=True)
+        sys.stdout.flush()
+        os._exit(130)
+    ex1.shutdown(wait=False)
+    ex2.shutdown(wait=False)
+    order = {id(b): i for i, b in enumerate(boards)}
+    results.sort(key=lambda r: order.get(id(r[0]), 0))
 
     for b, listing, err in results:
         name = b.get("company") or b.get("token")
         if not flt.company_ok(name):
             continue
         if err:
-            log(f"FAIL {name}: {err}")
+            log(f"SKIP {name}: Workday is rate limiting, will check again next run" if "SKIP:" in err
+                else f"FAIL {name}: {err}")
             continue
         total = kept = 0
         try:

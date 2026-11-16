@@ -57,7 +57,21 @@ def cmd_find(args, cfg, db):
     want = lambda name: not args.only or name in args.only
     jobs = []
     if want("boards"):
-        jobs += B.scan(cfg.get("boards", []), cfg, seen, days)
+        boards = cfg.get("boards", [])
+        # Workday rate-limits hard and its listings change slowly: check it at most every N hours
+        stamp = BASE / "data" / "last_workday_check.txt"
+        every = cfg.get("workday_every_hours", 6)
+        import time as _t
+        recent = stamp.exists() and _t.time() - stamp.stat().st_mtime < every * 3600
+        if recent and not args.workday:
+            n = sum(1 for b in boards if str(b.get("ats")).lower() == "workday")
+            boards = [b for b in boards if str(b.get("ats")).lower() != "workday"]
+            print(f"(Skipping {n} Workday companies: checked less than {every}h ago. `find --workday` forces it.)")
+        jobs += B.scan(boards, cfg, seen, days)
+        if not recent or args.workday:
+            if not B.WORKDAY_429["gave_up"]:
+                stamp.parent.mkdir(exist_ok=True)
+                stamp.write_text("ok")
     if want("builtin"):
         jobs += S.builtin(cfg, seen, days, BASE)
     if want("linkedin"):
@@ -209,6 +223,7 @@ def main():
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("find"); f.add_argument("--days", type=int)
     f.add_argument("--only", nargs="+", choices=["boards", "builtin", "linkedin", "urls"])
+    f.add_argument("--workday", action="store_true", help="check Workday even if it was checked recently")
     l = sub.add_parser("list"); l.add_argument("--status", choices=STATUSES); l.add_argument("--limit", type=int, default=60)
     l.add_argument("--notes", action="store_true", help="show what each filled job still needs")
     l.add_argument("--easy", action="store_true", help="only LinkedIn Easy Apply jobs")
