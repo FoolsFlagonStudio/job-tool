@@ -8,3 +8,5 @@ __pycache__/
 *.pyc
 .venv/
 applied.csv
+Connections.csv
+*.csv

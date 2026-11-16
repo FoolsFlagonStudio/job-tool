@@ -94,6 +94,15 @@ profile link. `list --notes` shows it, and `applied` puts it in a "Recruiter / w
 Jobs without one get a ready-made LinkedIn search link for "<company> technical recruiter" instead, so after
 applying you can open it and message someone. The tool never sends messages.
 
+### Referrals from your LinkedIn connections
+Download your connections from LinkedIn: Settings > Data privacy > Get a copy of your data > Connections.
+LinkedIn emails a link, usually within minutes. Put `Connections.csv` in the job-tool folder (it's git-ignored).
+`find` then tags every job at a company where you know someone with
+`REFERRAL: 2 connections - Jane Doe (Software Engineer), ...` and saves their profile links in the
+"who to contact" column of `applied`. `python -m jobtool list --referrals` shows just those jobs. Asking a
+connection for a referral before applying is usually the highest-odds move. Re-download the file now and then,
+since people change jobs.
+
 ### Blocked companies
 `filters: company_exclude:` in `config.yaml` lists companies to ignore everywhere: job-reposting sites
 (MeeBoss, RemoteHunter, Jobgether...), AI-training gig sites, and "training then placement" programs that
@@ -107,7 +116,12 @@ The tool uses its own Chrome profile (`data/browser-profile`), **not** your ever
 
 ## Adding companies
 
-Find the company's careers page and look at the job links:
+Easiest: `python -m jobtool add "Acme" "Beta Inc"`. It checks Greenhouse, Ashby, Lever, Workable,
+SmartRecruiters, Recruitee and Rippling for a board that belongs to that company (picking the busiest one if it
+has several) and adds it to `config.yaml`. You can also just put `- {company: "Acme"}` under `boards:`;
+`find` looks it up the first time and remembers it (no-match companies are retried weekly).
+
+If that finds nothing, the company is probably on Workday or a custom site. Look at its job links:
 
 | Link looks like | Add to `boards:` |
 |---|---|

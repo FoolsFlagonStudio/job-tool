@@ -50,10 +50,10 @@ class DB:
         try:
             self.con.execute(
                 "INSERT INTO jobs (key, alt_keys, company, title, location, url, ats, posted, first_seen,"
-                " resume, updated, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                " resume, updated, notes, recruiter) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (j["key"], ",".join(j.get("alt_keys", [])), j.get("company"), j.get("title"),
                  j.get("location"), j.get("url"), j.get("ats"), j.get("posted"), today, resume, today,
-                 j.get("notes") or ""))
+                 j.get("notes") or "", j.get("recruiter")))
             self.con.commit()
             return True
         except sqlite3.IntegrityError:

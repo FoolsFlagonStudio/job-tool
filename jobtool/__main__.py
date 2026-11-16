@@ -10,6 +10,8 @@
   python -m jobtool applied             # applications not yet copied to your tracker (then marks them copied)
   python -m jobtool applied --all       # every application, including ones already copied
   python -m jobtool forget --today       # un-see everything found today (keeps what you submitted), then find again
+  python -m jobtool add "Acme" "Beta Inc"  # find each company's job board and add it to config.yaml
+  python -m jobtool list --referrals     # jobs at companies where you have LinkedIn connections
   python -m jobtool mark 12 submitted    # fix a status by hand (new, filled, submitted, skipped, needs_you, closed)
   python -m jobtool check greenhouse cargurus   # verify a company board token before adding it
 """
@@ -57,7 +59,7 @@ def cmd_find(args, cfg, db):
     want = lambda name: not args.only or name in args.only
     jobs = []
     if want("boards"):
-        boards = cfg.get("boards", [])
+        boards = B.resolve_boards([dict(b) for b in cfg.get("boards", [])], BASE / "data" / "detected_boards.json")
         # Workday rate-limits hard and its listings change slowly: check it at most every N hours
         stamp = BASE / "data" / "last_workday_check.txt"
         every = cfg.get("workday_every_hours", 6)
@@ -66,7 +68,8 @@ def cmd_find(args, cfg, db):
         if recent and not args.workday:
             n = sum(1 for b in boards if str(b.get("ats")).lower() == "workday")
             boards = [b for b in boards if str(b.get("ats")).lower() != "workday"]
-            print(f"(Skipping {n} Workday companies: checked less than {every}h ago. `find --workday` forces it.)")
+            if n:
+                print(f"(Skipping {n} Workday companies: checked less than {every}h ago. `find --workday` forces it.)")
         jobs += B.scan(boards, cfg, seen, days)
         if not recent or args.workday:
             if not B.WORKDAY_429["gave_up"]:
@@ -80,10 +83,17 @@ def cmd_find(args, cfg, db):
         jobs += S.wellfound(cfg, seen, days, BASE)
     if want("linkedin"):
         jobs += S.linkedin(cfg, seen)
-    added, easy = 0, 0
+    from . import connections as C
+    conns = C.load(BASE)
+    added, easy, refs = 0, 0, 0
     for j in jobs:
         if db.same_role_exists(j["company"], j["title"]):
             continue
+        people = C.at(conns, j["company"])
+        if people:
+            j["notes"] = " | ".join(x for x in (C.summary(people), j.get("notes")) if x)
+            j["recruiter"] = "; ".join(f"{p['name']} {p['url']}" for p in people[:3])
+            refs += 1
         if db.add(j):
             added += 1
             easy += j["ats"] == "linkedin_easy"
@@ -104,6 +114,8 @@ def cmd_find(args, cfg, db):
                              "title": "(from urls.txt)", "location": "", "url": url,
                              "ats": ats_from_url(url), "posted": None})
     print(f"\n{added} new job(s) added. Run `python -m jobtool list` to see them.")
+    if refs:
+        print(f"{refs} of them are at companies where you have LinkedIn connections: `python -m jobtool list --referrals`")
     if easy:
         print(f"{easy} of them are LinkedIn Easy Apply only: `python -m jobtool list --status new` marks them [EASY].")
 
@@ -111,6 +123,8 @@ def cmd_find(args, cfg, db):
 def cmd_list(args, cfg, db):
     is_blocked = blocked(cfg)
     rows = [r for r in db.jobs(status=args.status) if not is_blocked(r)]
+    if args.referrals:
+        rows = [r for r in rows if "REFERRAL" in (r["notes"] or "")]
     if args.easy:
         rows = [r for r in rows if r["ats"] in ("linkedin_easy", "wellfound")]
     elif args.forms:
@@ -211,6 +225,28 @@ def cmd_forget(args, cfg, db):
     print(f"Forgot {n} job(s) first seen since {since} (submitted ones kept). Run `python -m jobtool find` for a fresh pull.")
 
 
+def cmd_add(args, cfg, db):
+    """Find each company's job board and append it to config.yaml."""
+    path = BASE / "config.yaml"
+    have = {B.norm_name(b.get("company")) for b in cfg.get("boards", [])}
+    lines = []
+    for name in args.names:
+        if B.norm_name(name) in have:
+            print(f"{name}: already in config.yaml")
+            continue
+        res = B.detect(name)
+        if not res:
+            print(f"{name}: no Greenhouse/Ashby/Lever/Workable/SmartRecruiters/Recruitee/Rippling board found."
+                  " If its job links go to myworkdayjobs.com, add it as a Workday board (see README).")
+            continue
+        ats, token, n = res
+        print(f"{name}: {ats} '{token}' - {n} open jobs. Added.")
+        lines.append(f'  - {{company: "{name}", ats: {ats}, token: {token}}}')
+    if lines:
+        text = path.read_text(encoding="utf-8").rstrip("\n")
+        path.write_text(text + "\n" + "\n".join(lines) + "\n", encoding="utf-8")
+
+
 def cmd_mark(args, cfg, db):
     db.set(args.id, status=args.status)
     print(f"Job {args.id} -> {args.status}")
@@ -234,6 +270,7 @@ def main():
     l = sub.add_parser("list"); l.add_argument("--status", choices=STATUSES); l.add_argument("--limit", type=int, default=60)
     l.add_argument("--notes", action="store_true", help="show what each filled job still needs")
     l.add_argument("--easy", action="store_true", help="only LinkedIn Easy Apply jobs")
+    l.add_argument("--referrals", action="store_true", help="only jobs where you have a LinkedIn connection")
     l.add_argument("--forms", action="store_true", help="only jobs with a real application form")
     a = sub.add_parser("apply"); a.add_argument("--count", type=int); a.add_argument("--ids", type=int, nargs="+")
     a.add_argument("--marathon", action="store_true",
@@ -245,6 +282,7 @@ def main():
     ap_ = sub.add_parser("applied"); ap_.add_argument("--all", action="store_true")
     ap_.add_argument("--since", help="only applications on or after this date, YYYY-MM-DD")
     fg = sub.add_parser("forget"); fg.add_argument("--today", action="store_true"); fg.add_argument("--since")
+    ad = sub.add_parser("add"); ad.add_argument("names", nargs="+", help='company names, e.g. "Wayfair" "Rapid7"')
     m = sub.add_parser("mark"); m.add_argument("id", type=int); m.add_argument("status", choices=STATUSES)
     c = sub.add_parser("check"); c.add_argument("ats"); c.add_argument("token"); c.add_argument("feed", nargs="?")
     args = ap.parse_args()
@@ -253,7 +291,7 @@ def main():
         return cmd_check(args, None, None)
     cfg = load_yaml("config.yaml")
     db = DB(BASE / cfg.get("database", "data/jobs.db"))
-    {"find": cmd_find, "list": cmd_list, "applied": cmd_applied, "forget": cmd_forget, "apply": cmd_apply, "mark": cmd_mark}[args.cmd](args, cfg, db)
+    {"find": cmd_find, "list": cmd_list, "applied": cmd_applied, "forget": cmd_forget, "add": cmd_add, "apply": cmd_apply, "mark": cmd_mark}[args.cmd](args, cfg, db)
 
 
 if __name__ == "__main__":

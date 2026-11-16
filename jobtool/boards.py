@@ -373,3 +373,95 @@ def check(ats, token, feed=None):
     if feed:
         b["feed"] = feed
     return sum(1 for _ in READERS[ats.lower()](b))
+
+
+# ---------- add companies by name: find which job board they use (cached) ----------
+GENERIC = {"inc", "llc", "ltd", "corp", "corporation", "co", "hq", "the", "com", "io", "ai", "app", "group",
+           "technologies", "technology", "software", "labs", "pbc", "company", "holdings"}
+DETECT_ORDER = ["greenhouse", "ashby", "lever", "workable", "smartrecruiters", "recruitee", "rippling"]
+
+
+def norm_name(x):
+    words = re.findall(r"[a-z0-9]+", (x or "").lower())
+    kept = [w for w in words if w not in GENERIC] or words
+    return "".join(kept)
+
+
+def slug_candidates(name):
+    base = re.sub(r"[^a-z0-9 ]", "", (name or "").lower()).strip()
+    words = base.split()
+    core = [w for w in words if w not in GENERIC] or words
+    c = ["".join(words), "-".join(words), "".join(core), "-".join(core)]
+    return [x for x in dict.fromkeys(c) if x]
+
+
+def _probe(ats, slug, name):
+    """Return number of jobs if `slug` on `ats` is this company's board, else raise."""
+    if ats == "greenhouse":   # Greenhouse boards report their company name: make sure it's the right one
+        meta = fetch(f"https://boards-api.greenhouse.io/v1/boards/{slug}", retry_429=False)
+        if norm_name(meta.get("name")) != norm_name(name):
+            raise ValueError(f"board belongs to {meta.get('name')!r}")
+    if ats == "workable":
+        d = fetch(f"https://apply.workable.com/api/v1/widget/accounts/{slug}", retry_429=False)
+        if d.get("name") and norm_name(d.get("name")) != norm_name(name):
+            raise ValueError(f"board belongs to {d.get('name')!r}")
+    if ats == "smartrecruiters":
+        d = fetch(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings?limit=1", retry_429=False)
+        if not d.get("totalFound"):
+            raise ValueError("empty")
+        return d["totalFound"]
+    return sum(1 for _ in READERS[ats]({"company": name, "ats": ats, "token": slug}))
+
+
+def detect(name, slugs=None):
+    """Find the board for a company name. Returns (ats, token, job_count) or None."""
+    for slug in (slugs or slug_candidates(name)):
+        hits = []
+        for ats in DETECT_ORDER:   # check every board type: some companies keep an old, near-empty one
+            try:
+                hits.append((_probe(ats, slug, name), ats))
+            except Exception:
+                continue
+        if hits:
+            n, ats = max(hits)
+            return ats, slug, n
+    return None
+
+
+def resolve_boards(boards, cache_path, log=print):
+    """Fill in ats/token for entries that only give a company name. Results are cached; companies
+    with no board found are retried weekly."""
+    cache = {}
+    try:
+        cache = json.loads(cache_path.read_text())
+    except Exception:
+        pass
+    now = datetime.now(timezone.utc)
+    todo = []
+    for b in boards:
+        if b.get("ats"):
+            continue
+        name = b.get("company")
+        hit = cache.get(name)
+        if hit and hit.get("ats"):
+            b["ats"], b["token"] = hit["ats"], hit["token"]
+        elif hit and (now - datetime.fromisoformat(hit["checked"])).days < 7:
+            b["ats"] = "none"
+        else:
+            todo.append(b)
+    if todo:
+        log(f"Looking up job boards for {len(todo)} compan{'y' if len(todo) == 1 else 'ies'} added by name...")
+        with ThreadPoolExecutor(8) as ex:
+            for b, res in zip(todo, ex.map(lambda b: detect(b["company"], b.get("slugs")), todo)):
+                if res:
+                    b["ats"], b["token"] = res[0], res[1]
+                    cache[b["company"]] = {"ats": res[0], "token": res[1], "checked": now.isoformat()}
+                    log(f"     {b['company']}: {res[0]} '{res[1]}' ({res[2]} jobs)")
+                else:
+                    b["ats"] = "none"
+                    cache[b["company"]] = {"checked": now.isoformat()}
+                    log(f"     {b['company']}: no board found (Workday or a custom site? add it with ats/token)."
+                        " Will retry in a week.")
+        cache_path.parent.mkdir(exist_ok=True)
+        cache_path.write_text(json.dumps(cache, indent=1, sort_keys=True))
+    return [b for b in boards if b.get("ats") != "none"]
