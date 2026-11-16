@@ -9,6 +9,7 @@
   python -m jobtool apply --easy         # LinkedIn Easy Apply jobs: opens them 5 at a time, you click Easy Apply
   python -m jobtool applied             # applications not yet copied to your tracker (then marks them copied)
   python -m jobtool applied --all       # every application, including ones already copied
+  python -m jobtool forget --today       # un-see everything found today (keeps what you submitted), then find again
   python -m jobtool mark 12 submitted    # fix a status by hand (new, filled, submitted, skipped, needs_you, closed)
   python -m jobtool check greenhouse cargurus   # verify a company board token before adding it
 """
@@ -180,6 +181,15 @@ def cmd_applied(args, cfg, db):
         print(f"Also added to {out.name}. They won't show here again (use --all to see everything).")
 
 
+def cmd_forget(args, cfg, db):
+    from datetime import date
+    since = date.today().isoformat() if args.today else args.since
+    if not since:
+        sys.exit("Use --today or --since YYYY-MM-DD")
+    n = db.forget(since)
+    print(f"Forgot {n} job(s) first seen since {since} (submitted ones kept). Run `python -m jobtool find` for a fresh pull.")
+
+
 def cmd_mark(args, cfg, db):
     db.set(args.id, status=args.status)
     print(f"Job {args.id} -> {args.status}")
@@ -212,6 +222,7 @@ def main():
     a.add_argument("--no-watch", action="store_true", help="don't wait for you to submit")
     ap_ = sub.add_parser("applied"); ap_.add_argument("--all", action="store_true")
     ap_.add_argument("--since", help="only applications on or after this date, YYYY-MM-DD")
+    fg = sub.add_parser("forget"); fg.add_argument("--today", action="store_true"); fg.add_argument("--since")
     m = sub.add_parser("mark"); m.add_argument("id", type=int); m.add_argument("status", choices=STATUSES)
     c = sub.add_parser("check"); c.add_argument("ats"); c.add_argument("token"); c.add_argument("feed", nargs="?")
     args = ap.parse_args()
@@ -220,7 +231,7 @@ def main():
         return cmd_check(args, None, None)
     cfg = load_yaml("config.yaml")
     db = DB(BASE / cfg.get("database", "data/jobs.db"))
-    {"find": cmd_find, "list": cmd_list, "applied": cmd_applied, "apply": cmd_apply, "mark": cmd_mark}[args.cmd](args, cfg, db)
+    {"find": cmd_find, "list": cmd_list, "applied": cmd_applied, "forget": cmd_forget, "apply": cmd_apply, "mark": cmd_mark}[args.cmd](args, cfg, db)
 
 
 if __name__ == "__main__":

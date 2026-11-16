@@ -80,6 +80,14 @@ class DB:
         self.con.execute(f"UPDATE jobs SET {cols} WHERE id = ?", (*fields.values(), job_id))
         self.con.commit()
 
+    def forget(self, since, keep_submitted=True):
+        q = "DELETE FROM jobs WHERE first_seen >= ?"
+        if keep_submitted:
+            q += " AND status != 'submitted'"
+        n = self.con.execute(q, (since,)).rowcount
+        self.con.commit()
+        return n
+
     def applied(self, include_exported=False, since=None):
         q = "SELECT * FROM jobs WHERE status = 'submitted'"
         args = []

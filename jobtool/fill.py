@@ -530,6 +530,17 @@ APPLY_STATE_JS = r"""() => {
 }"""
 
 
+DESC_JS = r"""() => { const d = document.querySelector('[class*="jobs-description"], #job-details, [class*="description__text"], [class*="show-more-less-html"]');
+  return (d ? d.innerText : '').slice(0, 30000); }"""
+
+
+def description_text(pg):
+    try:
+        return pg.evaluate(DESC_JS)
+    except Exception:
+        return ""
+
+
 def apply_state(pg):
     try:
         return pg.evaluate(APPLY_STATE_JS)
@@ -601,11 +612,18 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                 if LOGIN_WALL_RE.search(body) and not warned:
                     warned = True
                     log("\n  ** Sign in to LinkedIn in this window once (the tool remembers it), then reload the tab. **\n")
+                desc = description_text(pg)
+                from .sources import remote_conflict, in_target_area
+                from .boards import Filters
+                if not in_target_area(Filters(cfg), job["location"]) and remote_conflict(desc):
+                    db.set(job["id"], status="skipped", notes="Listed as remote, but the description says on-site/hybrid/relocate")
+                    log(f"[{job['id']}] {job['company']} - not actually remote, skipped")
+                    pg.close()
+                    continue
                 save_recruiter(db, job, pg)
                 open_pages[job["id"]] = (job, pg)
                 try:   # same keyword scoring the form filler uses, run on the full job description
-                    full = pg.evaluate("() => (document.body && document.body.innerText || '').slice(0, 30000)")
-                    variant, _ = choose_resume(job["title"] + " " + full, cfg, base_dir)
+                    variant, _ = choose_resume(job["title"] + " " + (desc or ""), cfg, base_dir)
                     db.set(job["id"], resume=variant)
                 except Exception:
                     variant = cfg.get("resumes", {}).get("default", "?")

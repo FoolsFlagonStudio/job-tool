@@ -42,6 +42,28 @@ def text(s):
     return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", s or ""))).strip()
 
 
+# ------------------------------------------------------------------ "remote" sanity check
+# Job sites (LinkedIn especially) label lots of on-site/hybrid jobs as remote. For jobs we only kept
+# because they're remote, read the description and drop them if it says otherwise.
+NOT_REMOTE_RE = re.compile(
+    r"relocat(e|ion) (to|assistance)|willing(ness)? to relocate|must (live|reside|be (located|based)) (in|within|near)|"
+    r"(on-?site|in[- ]office|in[- ]person)\b[^.]{0,60}\b(days?|required|requirement|position|role|5x|\d x)|"
+    r"\bhybrid\b|commut(e|ing) (to|distance)|report(ing)? to (our|the) office", re.I)
+REALLY_REMOTE_RE = re.compile(
+    r"fully remote|100% remote|remote[- ]first|work from anywhere|remote (anywhere )?(in|within) the (us|u\.s\.|united states)|"
+    r"(this|the) (is a )?(role|position) is (fully )?remote", re.I)
+
+
+def remote_conflict(description):
+    """True if a 'remote' job's description says it isn't really remote."""
+    d = description or ""
+    return bool(NOT_REMOTE_RE.search(d)) and not REALLY_REMOTE_RE.search(d)
+
+
+def in_target_area(flt, loc):
+    return bool(flt.places.search(loc or "") or flt.state.search(loc or ""))
+
+
 # ------------------------------------------------------------------ LinkedIn (logged out)
 LI_SEARCH = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
 LI_POSTING = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}"
@@ -89,7 +111,7 @@ def linkedin(cfg, seen, log=print):
                     loc = text((re.search(r'job-search-card__location[^>]*>(.*?)</span>', c, re.S) or [None, ""])[1])
                     posted = (re.search(r'datetime="([\d-]+)"', c) or [None, None])[1]
                     if s.get("remote") and "remote" not in loc.lower():
-                        loc = (loc + " (Remote)").strip()
+                        loc = (loc + " (remote?)").strip()   # LinkedIn's remote filter; verified below
                     if not flt.company_ok(company) or not flt.title_ok(title) or \
                             not flt.location_ok(loc, bool(s.get("remote"))):
                         continue
@@ -113,12 +135,20 @@ def linkedin(cfg, seen, log=print):
         for j in found:
             j["ats"] = "linkedin"
         return found
+    dropped = 0
     for n, j in enumerate(found):
         if throttled:
             j["ats"] = "linkedin"      # still applyable: apply opens the LinkedIn page and clicks Apply
             continue
         try:
             page = get_html(LI_POSTING.format(j["key"][3:]))
+            if not in_target_area(flt, j["location"]):
+                desc = re.search(r'show-more-less-html__markup[^>]*>(.*?)</div>', page, re.S)
+                if remote_conflict(text(desc.group(1) if desc else page)):
+                    j["_drop"] = True
+                    dropped += 1
+                    continue
+                j["location"] = j["location"].replace("(remote?)", "(Remote)")
             m = re.search(r'id="applyUrl"[^>]*>\s*<!--\s*"?([^"<]+)"?\s*-->', page)
             if m:
                 u = html.unescape(m.group(1))
@@ -137,7 +167,9 @@ def linkedin(cfg, seen, log=print):
                 "the rest will be resolved when you apply")
         except Exception:
             pass
-    return found
+    if dropped:
+        log(f"     dropped {dropped} LinkedIn 'remote' job(s) whose description says on-site, hybrid or relocate")
+    return [j for j in found if not j.get("_drop")]
 
 
 # ------------------------------------------------------------------ Built In Boston (browser)

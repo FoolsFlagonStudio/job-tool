@@ -61,6 +61,7 @@ python -m jobtool apply --easy       # work through Easy Apply jobs, 5 tabs at a
 python -m jobtool list --status filled --notes   # what each prefilled job still needs
 python -m jobtool applied           # what you've applied to since last time: date, company, title, link
 python -m jobtool applied --all     # every application
+python -m jobtool forget --today     # un-see everything found today (keeps submitted ones), then find again
 python -m jobtool mark 12 skipped    # statuses: new filled submitted skipped needs_you closed
 python -m jobtool check greenhouse cargurus      # test a board token before adding it
 ```
@@ -124,6 +125,9 @@ Check it with `python -m jobtool check <ats> <token>`.
   When LinkedIn shows "application was sent" or "Applied", the tool marks the job submitted, closes the tab
   and opens the next one. Jobs you applied to before are skipped automatically. Upload your resume variants
   to LinkedIn once (Settings > Data privacy > Job application settings) so you can pick one per job.
+- **"Remote" that isn't**: LinkedIn's remote filter lets through lots of on-site and hybrid jobs. A job that
+  only qualifies because it's remote has its description checked during `find` and again when its tab opens.
+  If the description mentions relocating, on-site days or hybrid, and doesn't also say fully remote, the job is dropped.
 - **Throttling (429)**: the tool now waits and retries, and if LinkedIn is still throttling it skips the rest
   of the LinkedIn searches for that run and keeps what it found. Run `find --only linkedin` again an hour later.
   Raise `pause_seconds` if it keeps happening.
