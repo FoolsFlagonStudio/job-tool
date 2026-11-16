@@ -54,10 +54,22 @@ REALLY_REMOTE_RE = re.compile(
     r"(this|the) (is a )?(role|position) is (fully )?remote", re.I)
 
 
-def remote_conflict(description):
-    """True if a 'remote' job's description says it isn't really remote."""
+def remote_conflict(description, flt=None):
+    """True if a 'remote' job's description puts you on-site, hybrid or relocating somewhere OUTSIDE
+    your target area. On-site/relocate in a place from config `places` (e.g. Boston, Cambridge, MA) is fine."""
     d = description or ""
-    return bool(NOT_REMOTE_RE.search(d)) and not REALLY_REMOTE_RE.search(d)
+    if REALLY_REMOTE_RE.search(d):
+        return False
+    hits = list(NOT_REMOTE_RE.finditer(d))
+    if not hits:
+        return False
+    if flt is None:
+        return True
+    for m in hits:
+        window = d[max(0, m.start() - 150): m.end() + 150]
+        if not in_target_area(flt, window):
+            return True        # on-site / relocate somewhere you don't want
+    return False               # every on-site / relocate mention is in your area
 
 
 def in_target_area(flt, loc):
@@ -144,7 +156,7 @@ def linkedin(cfg, seen, log=print):
             page = get_html(LI_POSTING.format(j["key"][3:]))
             if not in_target_area(flt, j["location"]):
                 desc = re.search(r'show-more-less-html__markup[^>]*>(.*?)</div>', page, re.S)
-                if remote_conflict(text(desc.group(1) if desc else page)):
+                if remote_conflict(text(desc.group(1) if desc else page), flt):
                     j["_drop"] = True
                     dropped += 1
                     continue

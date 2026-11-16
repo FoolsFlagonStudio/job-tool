@@ -615,8 +615,9 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                 desc = description_text(pg)
                 from .sources import remote_conflict, in_target_area
                 from .boards import Filters
-                if not in_target_area(Filters(cfg), job["location"]) and remote_conflict(desc):
-                    db.set(job["id"], status="skipped", notes="Listed as remote, but the description says on-site/hybrid/relocate")
+                flt = Filters(cfg)
+                if not in_target_area(flt, job["location"]) and remote_conflict(desc, flt):
+                    db.set(job["id"], status="skipped", notes="Listed as remote, but on-site/hybrid/relocate outside your area")
                     log(f"[{job['id']}] {job['company']} - not actually remote, skipped")
                     pg.close()
                     continue

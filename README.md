@@ -127,7 +127,7 @@ Check it with `python -m jobtool check <ats> <token>`.
   to LinkedIn once (Settings > Data privacy > Job application settings) so you can pick one per job.
 - **"Remote" that isn't**: LinkedIn's remote filter lets through lots of on-site and hybrid jobs. A job that
   only qualifies because it's remote has its description checked during `find` and again when its tab opens.
-  If the description mentions relocating, on-site days or hybrid, and doesn't also say fully remote, the job is dropped.
+  The job is dropped only if the description puts you on-site, hybrid or relocating somewhere outside your `places` list. On-site in Boston or relocating to Cambridge is fine.
 - **Throttling (429)**: the tool now waits and retries, and if LinkedIn is still throttling it skips the rest
   of the LinkedIn searches for that run and keeps what it found. Run `find --only linkedin` again an hour later.
   Raise `pause_seconds` if it keeps happening.
