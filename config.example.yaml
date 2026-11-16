@@ -82,6 +82,22 @@ sources:
       - https://www.builtinboston.com/jobs/dev-engineering/entry-level
       - https://www.builtinboston.com/jobs/dev-engineering/junior
       - https://www.builtinboston.com/jobs/dev-engineering/mid-level
+  hiringcafe:
+    enabled: true           # hiring.cafe collects jobs straight from company career pages
+    headless: true          # set false if it stops returning jobs (bot check)
+    scrolls: 6              # each scroll loads ~40 more results
+    # Best: set up a search on hiring.cafe yourself (location, seniority, date), copy the URL from the
+    # address bar, and paste it here. These starters search the last 4 days, entry to mid level:
+    searches:
+      - "https://hiring.cafe/?searchState=%7B%22dateFetchedPastNDays%22%3A4%2C%22seniorityLevel%22%3A%5B%22No%20Prior%20Experience%20Required%22%2C%22Entry%20Level%22%2C%22Mid%20Level%22%5D%2C%22searchQuery%22%3A%22software%20engineer%20boston%22%7D"
+      - "https://hiring.cafe/?searchState=%7B%22dateFetchedPastNDays%22%3A4%2C%22seniorityLevel%22%3A%5B%22No%20Prior%20Experience%20Required%22%2C%22Entry%20Level%22%2C%22Mid%20Level%22%5D%2C%22searchQuery%22%3A%22full%20stack%20engineer%20boston%22%7D"
+      - "https://hiring.cafe/?searchState=%7B%22dateFetchedPastNDays%22%3A4%2C%22seniorityLevel%22%3A%5B%22No%20Prior%20Experience%20Required%22%2C%22Entry%20Level%22%2C%22Mid%20Level%22%5D%2C%22searchQuery%22%3A%22software%20engineer%22%2C%22workplaceTypes%22%3A%5B%22Remote%22%5D%7D"
+  wellfound:
+    enabled: true           # opens a visible window; log in to Wellfound once and it remembers you
+    scrolls: 8
+    # Wellfound shows jobs matching the role/location preferences in your Wellfound profile.
+    # Optional: specific pages, e.g. https://wellfound.com/role/l/software-engineer/boston
+    pages: [https://wellfound.com/jobs]
   linkedin:
     enabled: true           # LinkedIn's public (logged-out) search: your account is never used
     past: day               # day | week | month  (use week on your first run or after a few days off)

@@ -74,6 +74,10 @@ def cmd_find(args, cfg, db):
                 stamp.write_text("ok")
     if want("builtin"):
         jobs += S.builtin(cfg, seen, days, BASE)
+    if want("hiringcafe"):
+        jobs += S.hiringcafe(cfg, seen, days, BASE)
+    if want("wellfound"):
+        jobs += S.wellfound(cfg, seen, days, BASE)
     if want("linkedin"):
         jobs += S.linkedin(cfg, seen)
     added, easy = 0, 0
@@ -108,16 +112,17 @@ def cmd_list(args, cfg, db):
     is_blocked = blocked(cfg)
     rows = [r for r in db.jobs(status=args.status) if not is_blocked(r)]
     if args.easy:
-        rows = [r for r in rows if r["ats"] == "linkedin_easy"]
+        rows = [r for r in rows if r["ats"] in ("linkedin_easy", "wellfound")]
     elif args.forms:
-        rows = [r for r in rows if r["ats"] != "linkedin_easy"]
+        rows = [r for r in rows if r["ats"] not in ("linkedin_easy", "wellfound")]
     rows = rows[:args.limit]
     if not rows:
         print("Nothing here.")
         return
     for r in rows:
         loc = (r["location"] or "")[:28]
-        tag = {"linkedin_easy": "[EASY] ", "workday": "[WD] ", "builtin": "[BI] ", "linkedin": "[LI] "}.get(r["ats"], "")
+        tag = {"linkedin_easy": "[EASY] ", "workday": "[WD] ", "builtin": "[BI] ", "linkedin": "[LI] ",
+               "wellfound": "[WF] "}.get(r["ats"], "")
         print(f"{r['id']:>4}  {r['status']:<10} {r['posted'] or r['first_seen']}  {tag}"
               f"{(r['company'] or '')[:22]:<22} {(r['title'] or '')[:52]:<52} {loc}")
         if not args.notes and r["status"] == "new" and r["notes"]:
@@ -139,7 +144,7 @@ def cmd_apply(args, cfg, db):
     is_blocked = blocked(cfg)
     if args.easy:
         jobs = db.jobs(ids=args.ids) if args.ids else \
-            [j for j in db.jobs(status="new") if j["ats"] == "linkedin_easy" and not is_blocked(j)]
+            [j for j in db.jobs(status="new") if j["ats"] in ("linkedin_easy", "wellfound") and not is_blocked(j)]
         if not jobs:
             print("No Easy Apply jobs waiting. Run `python -m jobtool find` first.")
             return
@@ -150,7 +155,7 @@ def cmd_apply(args, cfg, db):
     if args.ids:
         jobs = db.jobs(ids=args.ids)
     else:
-        skip = {"linkedin_easy"} | (set() if args.workday else {"workday"})
+        skip = {"linkedin_easy", "wellfound"} | (set() if args.workday else {"workday"})
         jobs = [j for j in db.jobs(status="new") if j["ats"] not in skip and not is_blocked(j)]
         if not args.marathon:
             jobs = jobs[:args.count or cfg["apply"]["batch_size"]]
@@ -224,7 +229,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("find"); f.add_argument("--days", type=int)
-    f.add_argument("--only", nargs="+", choices=["boards", "builtin", "linkedin", "urls"])
+    f.add_argument("--only", nargs="+", choices=["boards", "builtin", "hiringcafe", "wellfound", "linkedin", "urls"])
     f.add_argument("--workday", action="store_true", help="check Workday even if it was checked recently")
     l = sub.add_parser("list"); l.add_argument("--status", choices=STATUSES); l.add_argument("--limit", type=int, default=60)
     l.add_argument("--notes", action="store_true", help="show what each filled job still needs")

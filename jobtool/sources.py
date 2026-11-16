@@ -275,9 +275,221 @@ def ats_from_url(url):
     host = re.sub(r"^https?://", "", url or "").split("/")[0].lower()
     for key, ats in (("greenhouse", "greenhouse"), ("lever.co", "lever"), ("ashbyhq", "ashby"), ("workable", "workable"), ("recruitee", "recruitee"), ("rippling", "rippling"),
                      ("myworkdayjobs", "workday"), ("smartrecruiters", "smartrecruiters"),
-                     ("linkedin.com", "linkedin"), ("builtin", "builtin")):
+                     ("linkedin.com", "linkedin"), ("builtin", "builtin"), ("wellfound", "wellfound")):
         if key in host:
             return ats
     if "gh_jid=" in (url or ""):
         return "greenhouse"
     return "other"
+
+
+# ------------------------------------------------------------------ shared browser helpers
+def _launch(pw, cfg, base_dir, persistent=False, headless=True):
+    kw = {"headless": headless}
+    if cfg.get("apply", {}).get("browser", "chrome") == "chrome":
+        kw["channel"] = "chrome"
+    if persistent:   # your signed-in tool browser (same profile apply uses)
+        from pathlib import Path
+        ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"),
+                                                    viewport={"width": 1280, "height": 900}, **kw)
+        return ctx, ctx
+    browser = pw.chromium.launch(**kw)
+    return browser, browser.new_context(user_agent=BROWSER_UA, viewport={"width": 1280, "height": 900})
+
+
+def _days_ago(v):
+    if not v:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).days
+    except Exception:
+        return None
+
+
+def _keep(flt, j, days, seen, log_drop=None):
+    if j["key"] in seen or not j["title"]:
+        return False
+    if not flt.company_ok(j["company"]) or not flt.title_ok(j["title"]):
+        return False
+    if not flt.location_ok(j["location"], j.get("remote", False)):
+        return False
+    age = _days_ago(j.get("posted"))
+    if age is not None and age > days:
+        return False
+    if j.get("description") and not in_target_area(flt, j["location"]) and remote_conflict(j["description"], flt):
+        return False
+    return True
+
+
+# ------------------------------------------------------------------ hiring.cafe
+# hiring.cafe collects jobs straight from company career pages. The tool opens each search URL from the
+# config in a hidden browser, scrolls, and records the job data the page itself loads.
+def _dig(d, *paths):
+    for p in paths:
+        cur = d
+        for k in p.split("."):
+            cur = cur.get(k) if isinstance(cur, dict) else None
+            if cur is None:
+                break
+        if cur not in (None, ""):
+            return cur
+    return None
+
+
+def _hc_job(r):
+    v5 = r.get("v5_processed_job_data") or r.get("processed_job_data") or {}
+    title = _dig(r, "job_information.title", "title") or v5.get("core_job_title") or ""
+    company = v5.get("company_name") or _dig(r, "enriched_company_data.name", "company_name", "company") or ""
+    loc = v5.get("formatted_workplace_location") or _dig(r, "location", "job_information.location") or ""
+    wp = (v5.get("workplace_type") or "").lower()
+    if wp and wp not in loc.lower():
+        loc = f"{loc} ({v5.get('workplace_type')})".strip()
+    url = r.get("apply_url") or _dig(r, "job_information.apply_url", "url") or ""
+    jid = r.get("id") or r.get("objectID") or url
+    desc = _dig(r, "job_information.description", "description") or ""
+    comp = ""
+    if v5.get("yearly_min_compensation"):
+        comp = f"${int(v5['yearly_min_compensation']):,}" + (f"-${int(v5['yearly_max_compensation']):,}"
+                                                             if v5.get("yearly_max_compensation") else "")
+    from .boards import strip_html
+    return {"key": f"hc:{jid}", "alt_keys": [], "company": company, "title": title, "location": loc,
+            "remote": "remote" in wp or "remote" in loc.lower(), "url": url, "ats": ats_from_url(url),
+            "posted": v5.get("estimated_publish_date") or r.get("created_at"),
+            "description": strip_html(desc)[:8000], "comp": comp}
+
+
+def hiringcafe(cfg, seen, days, base_dir, log=print):
+    sc = cfg.get("sources", {}).get("hiringcafe", {})
+    if not sc.get("enabled"):
+        return []
+    from playwright.sync_api import sync_playwright
+    from .boards import Filters, info_notes
+    flt = Filters(cfg)
+    found, ids = [], set()
+    with sync_playwright() as pw:
+        owner, ctx = _launch(pw, cfg, base_dir, headless=sc.get("headless", True))
+        for url in sc.get("searches", []):
+            batch = []
+
+            def grab(resp):
+                if "/api/search" not in resp.url:
+                    return
+                try:
+                    d = resp.json()
+                except Exception:
+                    return
+                rows = d.get("results") or d.get("hits") or d.get("jobs") or (d if isinstance(d, list) else [])
+                batch.extend(r for r in rows if isinstance(r, dict))
+
+            page = ctx.new_page()
+            page.on("response", grab)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                page.wait_for_timeout(4000)
+                for _ in range(sc.get("scrolls", 6)):     # infinite scroll loads more results
+                    page.mouse.wheel(0, 6000)
+                    page.wait_for_timeout(1500)
+                kept = 0
+                for r in batch:
+                    j = _hc_job(r)
+                    if j["key"] in ids or not j["url"]:
+                        continue
+                    ids.add(j["key"])
+                    if _keep(flt, j, days, seen):
+                        j["notes"] = info_notes(j)
+                        j.pop("description", None)
+                        found.append(j)
+                        kept += 1
+                name = re.search(r"searchQuery%22%3A%22([^%]+)", url)
+                label = urllib.parse.unquote_plus(name.group(1)) if name else url[:60]
+                if not batch:
+                    log(f"FAIL hiring.cafe '{label}': page loaded no jobs (site may have changed or shown a bot check;"
+                        " try sources.hiringcafe.headless: false)")
+                else:
+                    log(f"OK   hiring.cafe '{label}': {len(batch)} listed, {kept} new")
+            except Exception as e:
+                log(f"FAIL hiring.cafe: {type(e).__name__}: {str(e)[:100]}")
+            page.close()
+        owner.close()
+    return found
+
+
+# ------------------------------------------------------------------ Wellfound (signed in)
+WF_JS = r"""() => {
+  const out = [], seen = new Set();
+  document.querySelectorAll('a[href*="/jobs/"]').forEach(a => {
+    const m = a.href.match(/\/jobs\/(\d+)[-\w]*/);
+    if (!m || seen.has(m[1])) return;
+    const title = (a.innerText || '').trim().split('\n')[0];
+    if (!title || title.length > 140) return;
+    let card = a;
+    for (let i = 0; i < 8 && card.parentElement; i++) {
+      card = card.parentElement;
+      if (card.querySelector('a[href*="/company/"]')) break;
+    }
+    const comp = card.querySelector('a[href*="/company/"]');
+    const t = card.innerText || '';
+    const loc = (t.match(/(Remote[^\n•]*|[A-Z][a-zA-Z .]+, (MA|Massachusetts)[^\n•]*|In office[^\n•]*|Hybrid[^\n•]*)/) || [''])[0];
+    const posted = (t.match(/(today|yesterday|\d+ (hours?|days?|weeks?) ago)/i) || [''])[0];
+    const pay = (t.match(/\$\s?\d+k\s?[–-]\s?\$\s?\d+k/i) || [''])[0];
+    seen.add(m[1]);
+    out.push({id: m[1], title, url: a.href.split('?')[0], location: loc, posted, pay,
+              company: comp ? (comp.innerText || '').trim().split('\n')[0] : ''});
+  });
+  return out;
+}"""
+
+
+def wellfound(cfg, seen, days, base_dir, log=print):
+    sc = cfg.get("sources", {}).get("wellfound", {})
+    if not sc.get("enabled"):
+        return []
+    from playwright.sync_api import sync_playwright
+    from .boards import Filters
+    flt = Filters(cfg)
+    found = []
+    with sync_playwright() as pw:
+        owner, ctx = _launch(pw, cfg, base_dir, persistent=True, headless=False)
+        page = ctx.new_page()
+        try:
+            page.goto("https://wellfound.com/jobs", wait_until="domcontentloaded", timeout=60000)
+            page.wait_for_timeout(3000)
+            if re.search(r"/login|/join", page.url) or page.get_by_text(re.compile(r"^log in$", re.I)).count():
+                log("     Wellfound: log in in the browser window (it remembers you after this). Waiting up to 5 minutes...")
+                page.wait_for_url(re.compile(r"wellfound\.com/(jobs|home|discover|role)"), timeout=300000)
+                if "/jobs" not in page.url:
+                    page.goto("https://wellfound.com/jobs", wait_until="domcontentloaded", timeout=60000)
+                page.wait_for_timeout(3000)
+            urls = sc.get("pages") or ["https://wellfound.com/jobs"]
+            rows, ids = [], set()
+            for u in urls:
+                if page.url.rstrip("/") != u.rstrip("/"):
+                    page.goto(u, wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(3000)
+                for _ in range(sc.get("scrolls", 8)):
+                    page.mouse.wheel(0, 5000)
+                    page.wait_for_timeout(1500 + random.random() * 1000)
+                for r in page.evaluate(WF_JS):
+                    if r["id"] not in ids:
+                        ids.add(r["id"])
+                        rows.append(r)
+            if not rows and re.search(r"verify|captcha|blocked|access denied", page.content()[:5000], re.I):
+                raise RuntimeError("Wellfound showed a bot check; solve it in the window and run find again")
+            now = datetime.now(timezone.utc)
+            for r in rows:
+                age = _bi_age_days(r["posted"].replace("weeks", "days")) if r["posted"] else None
+                if r["posted"] and "week" in r["posted"]:
+                    age = int(re.search(r"\d+", r["posted"]).group()) * 7
+                j = {"key": f"wf:{r['id']}", "alt_keys": [], "company": r["company"], "title": r["title"],
+                     "location": r["location"] or "", "remote": "remote" in (r["location"] or "").lower(),
+                     "url": r["url"], "ats": "wellfound", "notes": f"pay {r['pay']}" if r["pay"] else "",
+                     "posted": (now - timedelta(days=age)).date().isoformat() if age is not None else None}
+                if _keep(flt, j, days, seen):
+                    found.append(j)
+            log(f"OK   Wellfound: {len(rows)} listed, {len(found)} new")
+        except Exception as e:
+            log(f"FAIL Wellfound: {type(e).__name__}: {str(e)[:120]}")
+        owner.close()
+    return found

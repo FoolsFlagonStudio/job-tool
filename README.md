@@ -49,7 +49,7 @@ Activate the venv first (`.venv\Scripts\Activate.ps1` on Windows, `source .venv/
 
 ```bash
 python -m jobtool find               # pull new matches from every source (a couple of minutes)
-python -m jobtool find --only boards linkedin   # just some sources: boards builtin linkedin urls
+python -m jobtool find --only boards linkedin   # just some sources: boards builtin hiringcafe wellfound linkedin urls
 python -m jobtool list               # see the queue
 python -m jobtool apply              # open and prefill the next 5 (batch_size in config)
 python -m jobtool apply --count 10
@@ -143,6 +143,13 @@ Check it with `python -m jobtool check <ats> <token>`.
 - **Built In Boston**: `find` opens the entry-level, junior and mid-level engineering listings in a hidden
   browser. During `apply` the tool clicks Built In's Apply button and fills the company's own form. If Built In
   starts showing a "verify you are human" page, set `sources: builtin: headless: false`.
+- **hiring.cafe**: collects jobs straight from company career pages. `find` opens each search URL under
+  `sources: hiringcafe: searches:` in a hidden browser and reads the jobs the page loads. Easiest way to tune it:
+  build a search on hiring.cafe (location, seniority, date), copy the address bar URL, paste it into the list.
+- **Wellfound**: needs you logged in, so `find` opens a visible window. The first time, log in there (it
+  remembers you). It reads the jobs Wellfound shows for your profile's role and location preferences.
+  Wellfound jobs are applied to on Wellfound, so they show as `[WF]` and come up in `apply --easy` alongside
+  LinkedIn Easy Apply jobs. If a Wellfound tab doesn't get marked after you apply, `mark <id> submitted`.
 - **Indeed** blocks automated browsers, so copy any Indeed links you want into `urls.txt`.
 
 Anything in `urls.txt` (one link per line) joins the same queue and is deduped like everything else.

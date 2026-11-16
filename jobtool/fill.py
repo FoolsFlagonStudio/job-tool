@@ -492,8 +492,8 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True,
 # ---------------------------------------------------------------- LinkedIn Easy Apply sessions
 # The tool only opens each job page. You click Easy Apply and submit yourself (LinkedIn prefills
 # most of it from your profile). It never clicks anything on LinkedIn for you.
-EASY_DONE_RE = re.compile(r"your application was sent|application submitted|\bapplied \d+ (second|minute|hour|day|week|month)s? ago|"
-                          r"\bapplied (just now|today)|you applied", re.I)
+EASY_DONE_RE = re.compile(r"your application was sent|application submitted|application sent|^applied$|\bapplied \d+ (second|minute|hour|day|week|month)s? ago|"
+                          r"\bapplied (just now|today)|you applied", re.I | re.M)
 LOGIN_WALL_RE = re.compile(r"sign in to (apply|see|view)|join (now )?to (apply|see)|agree & join", re.I)
 
 HIRING_TEAM_JS = r"""() => {
@@ -566,7 +566,7 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
         ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"), **kwargs)
         open_pages, warned = {}, True
 
-        if need_login and not linkedin_signed_in(ctx):
+        if need_login and any("linkedin.com" in (j["url"] or "") for j in queue) and not linkedin_signed_in(ctx):
             pg = ctx.pages[0] if ctx.pages else ctx.new_page()
             pg.goto("https://www.linkedin.com/login", wait_until="domcontentloaded")
             log("Sign in to LinkedIn in the browser window (the tool remembers it after this).")
