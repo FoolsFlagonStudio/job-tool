@@ -113,3 +113,4 @@ boards:
   - {company: "CircleCI", ats: greenhouse, token: circleci}
   - {company: "Linear", ats: ashby, token: linear}
   - {company: "Vercel", ats: greenhouse, token: vercel}
+  - {company: "Cell Signaling Technology", ats: greenhouse, token: cellsignalingtechnology79}   # Danvers, life sciences
