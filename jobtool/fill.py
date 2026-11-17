@@ -367,7 +367,7 @@ def page_title(page):
 
 
 # ---------------------------------------------------------------- main entry
-CLOSED_RE = re.compile(r"no longer (accepting|available|open)|position (has been )?filled|job not found|"
+CLOSED_RE = re.compile(r"(no longer|not currently) (accepting|available|open)|position (has been )?filled|job not found|"
                        r"this job (is|has) (closed|expired)|page you('re| are) looking for", re.I)
 
 
@@ -492,6 +492,8 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True,
 # ---------------------------------------------------------------- LinkedIn Easy Apply sessions
 # The tool only opens each job page. You click Easy Apply and submit yourself (LinkedIn prefills
 # most of it from your profile). It never clicks anything on LinkedIn for you.
+JOB_CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|applications? (are|is) (now )?closed|"
+                           r"this job (is|has) (no longer available|closed|expired)|job (has been )?(closed|filled)", re.I)
 EASY_DONE_RE = re.compile(r"your application was sent|application submitted|application sent|^applied$|\bapplied \d+ (second|minute|hour|day|week|month)s? ago|"
                           r"\bapplied (just now|today)|you applied", re.I | re.M)
 LOGIN_WALL_RE = re.compile(r"sign in to (apply|see|view)|join (now )?to (apply|see)|agree & join", re.I)
@@ -637,7 +639,7 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     move_to_forms(db, job, pg, log)
                     continue
                 job["_kind"], job["_opened"] = kind, time.time()
-                if re.search(r"no longer accepting applications", body, re.I):
+                if JOB_CLOSED_RE.search(apply_state(pg) + "\n" + body[:3000]):
                     db.set(job["id"], status="closed")
                     log(f"[{job['id']}] closed - skipped")
                     pg.close()
@@ -678,6 +680,13 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                         continue
                     if not job.get("_rec"):
                         save_recruiter(db, job, pg)
+                    if time.time() - job.get("_opened", 0) < 30 and JOB_CLOSED_RE.search(apply_state(pg)):
+                        db.set(jid, status="closed")
+                        log(f"[{jid}] {job['company']} - not accepting applications, marked closed")
+                        del open_pages[jid]
+                        changed = True
+                        pg.close()
+                        continue
                     if job.get("_kind") == "unknown" and time.time() - job["_opened"] < 30:
                         job["_kind"] = apply_kind(pg)
                         if job["_kind"] == "external":
