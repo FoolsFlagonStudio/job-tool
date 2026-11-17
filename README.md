@@ -145,6 +145,8 @@ Check it with `python -m jobtool check <ats> <token>`.
 - **Easy Apply sessions**: `python -m jobtool apply --easy` opens the Easy Apply jobs 5 tabs at a time,
   newest first. Sign in to LinkedIn in that window the first time; it stays signed in. You click Easy Apply
   and submit. LinkedIn fills in most of it from your profile, and the tool never clicks anything on LinkedIn.
+  Some jobs look like Easy Apply from the logged-out search but actually apply on the company's site. The
+  session spots the real button and moves those to the forms queue (`apply --marathon` prefills them).
   When LinkedIn shows "application was sent" or "Applied", the tool marks the job submitted, closes the tab
   and opens the next one. Jobs you applied to before are skipped automatically. Upload your resume variants
   to LinkedIn once (Settings > Data privacy > Job application settings) so you can pick one per job.

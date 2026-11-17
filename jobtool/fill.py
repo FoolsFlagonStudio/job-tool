@@ -541,6 +541,27 @@ def description_text(pg):
         return ""
 
 
+# What kind of apply button does this LinkedIn job have? (signed in, the real button is visible)
+APPLY_KIND_JS = r"""() => {
+  const main = document.querySelector('main') || document.body;
+  const btns = [...main.querySelectorAll('button, a')].filter(b => {
+    if (b.closest('aside, [class*="similar"], [class*="recommend"], [class*="jobs-search-results"]')) return false;
+    const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0;
+  });
+  const label = b => ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).trim();
+  if (btns.some(b => /easy apply/i.test(label(b)))) return 'easy';
+  if (btns.some(b => /company website|apply on|^\s*apply\s*$/i.test(label(b)) || /^\s*apply\b/i.test(b.innerText || ''))) return 'external';
+  return 'unknown';
+}"""
+
+
+def apply_kind(pg):
+    try:
+        return pg.evaluate(APPLY_KIND_JS)
+    except Exception:
+        return "unknown"
+
+
 def apply_state(pg):
     try:
         return pg.evaluate(APPLY_STATE_JS)
@@ -602,6 +623,12 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                 if EASY_DONE_RE.search(apply_state(pg)):
                     db.set(job["id"], status="submitted", notes="Already applied on LinkedIn")
                     log(f"[{job['id']}] already applied - skipped")
+                    pg.close()
+                    continue
+                if "linkedin.com" in (job["url"] or "") and apply_kind(pg) == "external":
+                    db.set(job["id"], ats="linkedin")   # not Easy Apply: the forms queue handles it
+                    log(f"[{job['id']}] {job['company']} - applies on the company's site, moved to the forms queue"
+                        " (`apply --marathon`)")
                     pg.close()
                     continue
                 if re.search(r"no longer accepting applications", body, re.I):
