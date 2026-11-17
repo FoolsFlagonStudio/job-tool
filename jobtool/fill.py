@@ -634,6 +634,9 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     log(f"[{job['id']}] already applied - skipped")
                     pg.close()
                     continue
+                if "linkedin.com" in (job["url"] or "") and wrong_place(cfg, job, pg):
+                    skip_wrong_place(db, job, pg, log)
+                    continue
                 kind = apply_kind(pg) if "linkedin.com" in (job["url"] or "") else "easy"
                 if kind == "external":
                     move_to_forms(db, job, pg, log)
@@ -687,6 +690,14 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                         changed = True
                         pg.close()
                         continue
+                    if time.time() - job.get("_opened", 0) < 30 and not job.get("_placed") \
+                            and "linkedin.com" in (job["url"] or "") and apply_state(pg):
+                        if wrong_place(cfg, job, pg):
+                            del open_pages[jid]
+                            skip_wrong_place(db, job, pg, log)
+                            changed = True
+                            continue
+                        job["_placed"] = re.search(r"on-?site|hybrid|remote", apply_state(pg), re.I) is not None
                     if job.get("_kind") == "unknown" and time.time() - job["_opened"] < 30:
                         job["_kind"] = apply_kind(pg)
                         if job["_kind"] == "external":
@@ -713,6 +724,31 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
             ctx.close()
         except Exception:
             pass
+
+
+def wrong_place(cfg, job, pg):
+    """Signed-in LinkedIn shows a workplace label (On-site / Hybrid / Remote) in the job header.
+    True if the job is on-site or hybrid somewhere outside your configured area."""
+    from .sources import in_target_area
+    from .boards import Filters
+    head = apply_state(pg)
+    if not head:
+        return False
+    on_site = re.search(r"\b(on-?site|hybrid)", head, re.I)   # labels can run together: "On-siteFull-time"
+    remote = re.search(r"\bremote", head, re.I)
+    if not on_site or remote:
+        return False
+    first = head.split("\n")[:12]                     # header lines include the job's location
+    return not in_target_area(Filters(cfg), " ".join(first) + " " + (job.get("location") or "").replace("(Remote)", ""))
+
+
+def skip_wrong_place(db, job, pg, log):
+    db.set(job["id"], status="skipped", notes="On-site/hybrid outside your area (LinkedIn's workplace label)")
+    log(f"[{job['id']}] {job['company']} - on-site/hybrid outside your area, skipped")
+    try:
+        pg.close()
+    except Exception:
+        pass
 
 
 def move_to_forms(db, job, pg, log):
