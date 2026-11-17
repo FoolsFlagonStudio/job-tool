@@ -543,9 +543,16 @@ def description_text(pg):
 
 # What kind of apply button does this LinkedIn job have? (signed in, the real button is visible)
 APPLY_KIND_JS = r"""() => {
+  const vis = b => { const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+  const inCard = b => b.closest('aside, li, [class*="job-card"], [class*="similar"], [class*="recommend"], [class*="jobs-search-results"], [class*="discovery"]');
+  const lab = b => ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).trim();
+  // 1. LinkedIn's own apply button in the job's header
+  const primary = [...document.querySelectorAll('.jobs-apply-button, [id^="jobs-apply-button"], [class*="jobs-apply-button"] button, button[aria-label*="Apply" i], a[aria-label*="Apply" i]')]
+    .filter(b => vis(b) && !inCard(b));
+  if (primary.length) return /easy apply/i.test(lab(primary[0])) ? 'easy' : 'external';
   const main = document.querySelector('main') || document.body;
   const btns = [...main.querySelectorAll('button, a')].filter(b => {
-    if (b.closest('aside, [class*="similar"], [class*="recommend"], [class*="jobs-search-results"]')) return false;
+    if (inCard(b)) return false;
     const r = b.getBoundingClientRect(); return r.width > 0 && r.height > 0;
   });
   const label = b => ((b.innerText || '') + ' ' + (b.getAttribute('aria-label') || '')).trim();
@@ -625,12 +632,11 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     log(f"[{job['id']}] already applied - skipped")
                     pg.close()
                     continue
-                if "linkedin.com" in (job["url"] or "") and apply_kind(pg) == "external":
-                    db.set(job["id"], ats="linkedin")   # not Easy Apply: the forms queue handles it
-                    log(f"[{job['id']}] {job['company']} - applies on the company's site, moved to the forms queue"
-                        " (`apply --marathon`)")
-                    pg.close()
+                kind = apply_kind(pg) if "linkedin.com" in (job["url"] or "") else "easy"
+                if kind == "external":
+                    move_to_forms(db, job, pg, log)
                     continue
+                job["_kind"], job["_opened"] = kind, time.time()
                 if re.search(r"no longer accepting applications", body, re.I):
                     db.set(job["id"], status="closed")
                     log(f"[{job['id']}] closed - skipped")
@@ -672,6 +678,13 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                         continue
                     if not job.get("_rec"):
                         save_recruiter(db, job, pg)
+                    if job.get("_kind") == "unknown" and time.time() - job["_opened"] < 30:
+                        job["_kind"] = apply_kind(pg)
+                        if job["_kind"] == "external":
+                            del open_pages[jid]
+                            move_to_forms(db, job, pg, log)
+                            changed = True
+                            continue
                     if EASY_DONE_RE.search(apply_state(pg)):
                         db.set(jid, status="submitted")
                         log(f"[{jid}] submitted  ({len(queue)} left in queue)")
@@ -691,6 +704,15 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
             ctx.close()
         except Exception:
             pass
+
+
+def move_to_forms(db, job, pg, log):
+    db.set(job["id"], ats="linkedin")   # not Easy Apply: apply --marathon follows it to the company form
+    log(f"[{job['id']}] {job['company']} - applies on the company's site, moved to the forms queue (`apply --marathon`)")
+    try:
+        pg.close()
+    except Exception:
+        pass
 
 
 def save_recruiter(db, job, pg):

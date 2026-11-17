@@ -12,6 +12,7 @@
   python -m jobtool forget --today       # un-see everything found today (keeps what you submitted), then find again
   python -m jobtool add "Acme" "Beta Inc"  # find each company's job board and add it to config.yaml
   python -m jobtool list --referrals     # jobs at companies where you have LinkedIn connections
+  python -m jobtool mark 12 forms        # LinkedIn job that isn't really Easy Apply -> forms queue
   python -m jobtool mark 12 submitted    # fix a status by hand (new, filled, submitted, skipped, needs_you, closed)
   python -m jobtool check greenhouse cargurus   # verify a company board token before adding it
 """
@@ -248,6 +249,10 @@ def cmd_add(args, cfg, db):
 
 
 def cmd_mark(args, cfg, db):
+    if args.status == "forms":       # LinkedIn job that's really an external application
+        db.set(args.id, status="new", ats="linkedin")
+        print(f"Job {args.id} -> forms queue (apply --marathon will open it and follow Apply to the company form)")
+        return
     db.set(args.id, status=args.status)
     print(f"Job {args.id} -> {args.status}")
 
@@ -283,7 +288,7 @@ def main():
     ap_.add_argument("--since", help="only applications on or after this date, YYYY-MM-DD")
     fg = sub.add_parser("forget"); fg.add_argument("--today", action="store_true"); fg.add_argument("--since")
     ad = sub.add_parser("add"); ad.add_argument("names", nargs="+", help='company names, e.g. "Wayfair" "Rapid7"')
-    m = sub.add_parser("mark"); m.add_argument("id", type=int); m.add_argument("status", choices=STATUSES)
+    m = sub.add_parser("mark"); m.add_argument("id", type=int); m.add_argument("status", choices=list(STATUSES) + ["forms"])
     c = sub.add_parser("check"); c.add_argument("ats"); c.add_argument("token"); c.add_argument("feed", nargs="?")
     args = ap.parse_args()
 
