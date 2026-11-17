@@ -87,8 +87,13 @@ def cmd_find(args, cfg, db):
     from . import connections as C
     conns = C.load(BASE)
     added, easy, refs = 0, 0, 0
+    reposted = 0
     for j in jobs:
-        if db.same_role_exists(j["company"], j["title"]):
+        dup = db.same_role_exists(j["company"], j["title"])
+        if dup:
+            if dup["status"] == "closed":     # it was closed and is open again: bring it back
+                db.reopen(dup["id"], j)
+                reposted += 1
             continue
         people = C.at(conns, j["company"])
         if people:
@@ -115,6 +120,8 @@ def cmd_find(args, cfg, db):
                              "title": "(from urls.txt)", "location": "", "url": url,
                              "ats": ats_from_url(url), "posted": None})
     print(f"\n{added} new job(s) added. Run `python -m jobtool list` to see them.")
+    if reposted:
+        print(f"{reposted} job(s) you saw closed have been reposted and are back in the queue (marked REPOSTED).")
     if refs:
         print(f"{refs} of them are at companies where you have LinkedIn connections: `python -m jobtool list --referrals`")
     if easy:

@@ -76,6 +76,11 @@ Rippling), `list` shows a short line under new jobs, e.g. `asks 3+ yrs | pay $11
 information only and never hide a job. The description is also used to drop "remote" jobs that turn out to be
 on-site, hybrid or relocating outside your area, the same check LinkedIn jobs get.
 
+### Closed and reposted jobs
+When a posting says it's no longer accepting applications, the job is marked `closed`. If the same company
+later posts the same title again (a new listing or a repost), `find` puts it back in the queue with a
+`REPOSTED` note instead of treating it as a duplicate. Skipped and submitted jobs stay out.
+
 ### Tracking what you applied to
 When a confirmation page appears after you click Submit, the tool marks that job submitted and saves the date.
 If it misses one, run `python -m jobtool mark <id> submitted`.

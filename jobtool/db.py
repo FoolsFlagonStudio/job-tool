@@ -45,6 +45,14 @@ class DB:
             "SELECT id, status FROM jobs WHERE lower(company)=lower(?) AND lower(title)=lower(?)",
             (company, title)).fetchone()
 
+    def reopen(self, job_id, j):
+        """A closed job was reposted: point the existing row at the new listing and put it back in the queue."""
+        row = self.con.execute("SELECT alt_keys, notes FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        alt = ",".join(x for x in [row["alt_keys"], j["key"], *j.get("alt_keys", [])] if x)
+        note = " | ".join(x for x in ["REPOSTED", j.get("notes")] if x)
+        self.set(job_id, status="new", url=j.get("url"), ats=j.get("ats"), posted=j.get("posted"),
+                 location=j.get("location"), alt_keys=alt, notes=note)
+
     def add(self, j, resume=None):
         today = date.today().isoformat()
         try:
