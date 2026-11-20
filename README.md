@@ -143,10 +143,10 @@ Check it with `python -m jobtool check <ats> <token>`.
 ## LinkedIn, Built In, Indeed
 
 - **LinkedIn**: `find` reads LinkedIn's public job search, the version anyone sees when logged out, so your
-  account is never used. Edit the searches under `sources: linkedin:` in `config.yaml`. Set `past: week` after a
-  few days away. For each match it looks up the company's own application link, so `apply` can prefill it.
-  Easy Apply-only jobs are marked `[EASY]` in `list`. `apply` skips them, so apply on LinkedIn and then
-  `mark <id> submitted`. If LinkedIn throttles you (FAIL ... 429), wait an hour or raise `pause_seconds`.
+  account is never used. Edit the searches under `sources: linkedin:` in `config.yaml`. `past: auto` (the default) searches back
+  to your last LinkedIn run, so days away aren't missed. New LinkedIn jobs show as `[LI?]` in `list`. `apply --easy` opens them while
+  you're signed in, keeps the real Easy Apply ones (`[EASY]`), and moves company-site ones to the forms queue
+  for `apply --marathon`. This saves one LinkedIn request per job, which means less throttling. If LinkedIn throttles you (FAIL ... 429), wait an hour or raise `pause_seconds`.
 - **Easy Apply sessions**: `python -m jobtool apply --easy` opens the Easy Apply jobs 5 tabs at a time,
   newest first. Sign in to LinkedIn in that window the first time; it stays signed in. You click Easy Apply
   and submit. LinkedIn fills in most of it from your profile, and the tool never clicks anything on LinkedIn.

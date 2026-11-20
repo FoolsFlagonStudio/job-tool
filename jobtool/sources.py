@@ -82,20 +82,37 @@ LI_POSTING = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{}"
 PAST = {"day": "r86400", "week": "r604800", "month": "r2592000"}
 
 
-def linkedin(cfg, seen, log=print):
+LINKEDIN_OK = {"ok": False}
+
+
+def _window(sc, s, since):
+    """LinkedIn's 'posted within' filter. past: auto (default) searches back to your last run."""
+    past = s.get("past", sc.get("past", "auto"))
+    if past in PAST:
+        return PAST[past]
+    if not since:
+        return PAST["week"]
+    secs = (datetime.now(timezone.utc) - since).total_seconds() + 6 * 3600   # small overlap
+    return "r%d" % int(min(max(secs, 86400), 30 * 86400))
+
+
+def linkedin(cfg, seen, log=print, since=None):
     sc = cfg.get("sources", {}).get("linkedin", {})
     if not sc.get("enabled"):
         return []
     flt = Filters(cfg)
     found, ids = [], set()
-    pause = sc.get("pause_seconds", 5)
+    pause = sc.get("pause_seconds", 8)
+    if since is None or sc.get("past", "auto") == "auto":
+        w = int(_window(sc, {}, since)[1:]) // 3600
+        log(f"     LinkedIn: searching jobs posted in the last {w // 24} day(s) {w % 24}h")
     throttled = False
     for s in sc.get("searches", []):
         if throttled:
             log(f"SKIP LinkedIn '{s['keywords']}': throttled earlier this run")
             continue
         params = {"keywords": s["keywords"], "location": s.get("location", "Boston, Massachusetts, United States"),
-                  "f_TPR": PAST.get(s.get("past", sc.get("past", "day")), "r86400"), "sortBy": "DD"}
+                  "f_TPR": _window(sc, s, since), "sortBy": "DD"}
         if s.get("distance"):
             params["distance"] = s["distance"]
         if sc.get("experience"):
@@ -143,9 +160,12 @@ def linkedin(cfg, seen, log=print):
                 + (" (LinkedIn is throttling, try again later)" if "429" in str(e) else ""))
     # find where each job is really applied to (company site) so it can be prefilled.
     # This is one extra request per job, so it stops at the first sign of throttling.
-    if not sc.get("resolve_apply_links", True):
+    LINKEDIN_OK["ok"] = not throttled
+    if not sc.get("resolve_apply_links", False):
+        # No per-job lookups (halves LinkedIn requests). Your signed-in `apply --easy` session checks each
+        # job's real button: Easy Apply stays there, company-site jobs move to the forms queue.
         for j in found:
-            j["ats"] = "linkedin"
+            j["ats"] = "linkedin_check"
         return found
     dropped = 0
     for n, j in enumerate(found):

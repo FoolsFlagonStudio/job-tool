@@ -27,6 +27,29 @@ from . import boards as B
 from .db import DB, STATUSES
 
 BASE = Path(__file__).resolve().parent.parent
+STATE = BASE / "data" / "state.json"
+
+
+def state_get(key):
+    import json
+    from datetime import datetime
+    try:
+        v = json.loads(STATE.read_text()).get(key)
+        return datetime.fromisoformat(v) if v else None
+    except Exception:
+        return None
+
+
+def state_set(key):
+    import json
+    from datetime import datetime, timezone
+    try:
+        d = json.loads(STATE.read_text())
+    except Exception:
+        d = {}
+    d[key] = datetime.now(timezone.utc).isoformat()
+    STATE.parent.mkdir(exist_ok=True)
+    STATE.write_text(json.dumps(d, indent=1))
 
 
 def load_yaml(name):
@@ -62,10 +85,10 @@ def cmd_find(args, cfg, db):
     if want("boards"):
         boards = B.resolve_boards([dict(b) for b in cfg.get("boards", [])], BASE / "data" / "detected_boards.json")
         # Workday rate-limits hard and its listings change slowly: check it at most every N hours
-        stamp = BASE / "data" / "last_workday_check.txt"
         every = cfg.get("workday_every_hours", 6)
-        import time as _t
-        recent = stamp.exists() and _t.time() - stamp.stat().st_mtime < every * 3600
+        from datetime import datetime, timezone
+        last = state_get("workday_checked")
+        recent = bool(last) and (datetime.now(timezone.utc) - last).total_seconds() < every * 3600
         if recent and not args.workday:
             n = sum(1 for b in boards if str(b.get("ats")).lower() == "workday")
             boards = [b for b in boards if str(b.get("ats")).lower() != "workday"]
@@ -74,8 +97,7 @@ def cmd_find(args, cfg, db):
         jobs += B.scan(boards, cfg, seen, days)
         if not recent or args.workday:
             if not B.WORKDAY_429["gave_up"]:
-                stamp.parent.mkdir(exist_ok=True)
-                stamp.write_text("ok")
+                state_set("workday_checked")
     if want("builtin"):
         jobs += S.builtin(cfg, seen, days, BASE)
     if want("hiringcafe"):
@@ -83,7 +105,9 @@ def cmd_find(args, cfg, db):
     if want("wellfound"):
         jobs += S.wellfound(cfg, seen, days, BASE)
     if want("linkedin"):
-        jobs += S.linkedin(cfg, seen)
+        jobs += S.linkedin(cfg, seen, since=state_get("linkedin_checked"))
+        if S.LINKEDIN_OK["ok"]:
+            state_set("linkedin_checked")
     from . import connections as C
     conns = C.load(BASE)
     added, easy, refs = 0, 0, 0
@@ -102,7 +126,7 @@ def cmd_find(args, cfg, db):
             refs += 1
         if db.add(j):
             added += 1
-            easy += j["ats"] == "linkedin_easy"
+            easy += j["ats"] in ("linkedin_easy", "linkedin_check")
     if not want("urls"):
         print(f"\n{added} new job(s) added.")
         return
@@ -125,7 +149,8 @@ def cmd_find(args, cfg, db):
     if refs:
         print(f"{refs} of them are at companies where you have LinkedIn connections: `python -m jobtool list --referrals`")
     if easy:
-        print(f"{easy} of them are LinkedIn Easy Apply only: `python -m jobtool list --status new` marks them [EASY].")
+        print(f"{easy} of them are LinkedIn jobs: `python -m jobtool apply --easy` opens them signed in, keeps the Easy Apply"
+              " ones and moves company-site ones to the forms queue.")
 
 
 def cmd_list(args, cfg, db):
@@ -134,16 +159,16 @@ def cmd_list(args, cfg, db):
     if args.referrals:
         rows = [r for r in rows if "REFERRAL" in (r["notes"] or "")]
     if args.easy:
-        rows = [r for r in rows if r["ats"] in ("linkedin_easy", "wellfound")]
+        rows = [r for r in rows if r["ats"] in ("linkedin_easy", "linkedin_check", "wellfound")]
     elif args.forms:
-        rows = [r for r in rows if r["ats"] not in ("linkedin_easy", "wellfound")]
+        rows = [r for r in rows if r["ats"] not in ("linkedin_easy", "linkedin_check", "wellfound")]
     rows = rows[:args.limit]
     if not rows:
         print("Nothing here.")
         return
     for r in rows:
         loc = (r["location"] or "")[:28]
-        tag = {"linkedin_easy": "[EASY] ", "workday": "[WD] ", "builtin": "[BI] ", "linkedin": "[LI] ",
+        tag = {"linkedin_easy": "[EASY] ", "linkedin_check": "[LI?] ", "workday": "[WD] ", "builtin": "[BI] ", "linkedin": "[LI] ",
                "wellfound": "[WF] "}.get(r["ats"], "")
         print(f"{r['id']:>4}  {r['status']:<10} {r['posted'] or r['first_seen']}  {tag}"
               f"{(r['company'] or '')[:22]:<22} {(r['title'] or '')[:52]:<52} {loc}")
@@ -166,7 +191,7 @@ def cmd_apply(args, cfg, db):
     is_blocked = blocked(cfg)
     if args.easy:
         jobs = db.jobs(ids=args.ids) if args.ids else \
-            [j for j in db.jobs(status="new") if j["ats"] in ("linkedin_easy", "wellfound") and not is_blocked(j)]
+            [j for j in db.jobs(status="new") if j["ats"] in ("linkedin_easy", "linkedin_check", "wellfound") and not is_blocked(j)]
         if not jobs:
             print("No Easy Apply jobs waiting. Run `python -m jobtool find` first.")
             return
@@ -177,7 +202,7 @@ def cmd_apply(args, cfg, db):
     if args.ids:
         jobs = db.jobs(ids=args.ids)
     else:
-        skip = {"linkedin_easy", "wellfound"} | (set() if args.workday else {"workday"})
+        skip = {"linkedin_easy", "linkedin_check", "wellfound"} | (set() if args.workday else {"workday"})
         jobs = [j for j in db.jobs(status="new") if j["ats"] not in skip and not is_blocked(j)]
         if not args.marathon:
             jobs = jobs[:args.count or cfg["apply"]["batch_size"]]

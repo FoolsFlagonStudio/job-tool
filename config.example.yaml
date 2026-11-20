@@ -100,11 +100,12 @@ sources:
     pages: [https://wellfound.com/jobs]
   linkedin:
     enabled: true           # LinkedIn's public (logged-out) search: your account is never used
-    past: day               # day | week | month  (use week on your first run or after a few days off)
+    past: auto              # auto = back to your last LinkedIn run (so days off aren't missed) | day | week | month
     experience: [2, 3]      # 1 internship, 2 entry level, 3 associate, 4 mid-senior
-    max_results_per_search: 100
-    pause_seconds: 5        # seconds between LinkedIn requests (plus a random extra). Raise to 8-10 if you see 429s
-    resolve_apply_links: true   # look up each job's company apply link (1 extra request per job)
+    max_results_per_search: 50   # results come newest first; 50 covers a day or two
+    pause_seconds: 8        # seconds between LinkedIn requests (plus a random extra). Raise if you see lots of 429s
+    resolve_apply_links: false  # true = 1 extra request per job to find its company link (more throttling).
+                                # Not needed: apply --easy sorts Easy Apply vs company-site jobs while you're signed in.
     searches:
       - {keywords: "software engineer", location: "Boston, Massachusetts, United States", distance: 25}
       - {keywords: "full stack engineer", location: "Boston, Massachusetts, United States", distance: 25}

@@ -642,6 +642,8 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     move_to_forms(db, job, pg, log)
                     continue
                 job["_kind"], job["_opened"] = kind, time.time()
+                if kind == "easy" and job.get("ats") == "linkedin_check":
+                    db.set(job["id"], ats="linkedin_easy")
                 if JOB_CLOSED_RE.search(apply_state(pg) + "\n" + body[:3000]):
                     db.set(job["id"], status="closed")
                     log(f"[{job['id']}] closed - skipped")
