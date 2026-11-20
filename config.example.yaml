@@ -102,6 +102,7 @@ sources:
     enabled: true           # LinkedIn's public (logged-out) search: your account is never used
     past: auto              # auto = back to your last LinkedIn run (so days off aren't missed) | day | week | month
     experience: [2, 3]      # 1 internship, 2 entry level, 3 associate, 4 mid-senior
+    remote_city_ok: false   # remote searches: drop jobs listed in a specific city outside your area (usually not remote)
     max_results_per_search: 50   # results come newest first; 50 covers a day or two
     pause_seconds: 8        # seconds between LinkedIn requests (plus a random extra). Raise if you see lots of 429s
     resolve_apply_links: false  # true = 1 extra request per job to find its company link (more throttling).

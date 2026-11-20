@@ -119,7 +119,7 @@ def linkedin(cfg, seen, log=print, since=None, on_batch=None):
             params["f_E"] = ",".join(str(e) for e in sc["experience"])
         if s.get("remote"):
             params["f_WT"] = "2"
-        total = kept = 0
+        total = kept = city_skipped = 0
         mark = len(found)
         try:
             for start in range(0, sc.get("max_results_per_search", 100), 10):
@@ -141,7 +141,13 @@ def linkedin(cfg, seen, log=print, since=None, on_batch=None):
                     loc = text((re.search(r'job-search-card__location[^>]*>(.*?)</span>', c, re.S) or [None, ""])[1])
                     posted = (re.search(r'datetime="([\d-]+)"', c) or [None, None])[1]
                     if s.get("remote") and "remote" not in loc.lower():
-                        loc = (loc + " (remote?)").strip()   # LinkedIn's remote filter; verified below
+                        # LinkedIn's remote filter lets lots of on-site/hybrid jobs through. Truly remote jobs are
+                        # listed as a country/region ("United States") or say Remote; "Cincinnati, OH" isn't.
+                        if ((re.search(r",\s*[A-Z]{2}\b|\bArea\b", loc) or loc.count(",") >= 2) and not in_target_area(flt, loc)
+                                and not sc.get("remote_city_ok", False)):
+                            city_skipped += 1
+                            continue
+                        loc = (loc + " (remote?)").strip()
                     if not flt.company_ok(company) or not flt.title_ok(title) or \
                             not flt.location_ok(loc, bool(s.get("remote"))):
                         continue
@@ -150,7 +156,8 @@ def linkedin(cfg, seen, log=print, since=None, on_batch=None):
                                   "ats": "linkedin", "posted": posted})
                     kept += 1
                 time.sleep(pause + random.random())
-            log(f"OK   LinkedIn '{s['keywords']}'{' remote' if s.get('remote') else ''}: {total} listed, {kept} new")
+            log(f"OK   LinkedIn '{s['keywords']}'{' remote' if s.get('remote') else ''}: {total} listed, {kept} new"
+                + (f" ({city_skipped} 'remote' jobs listed in a city outside your area dropped)" if city_skipped else ""))
             if on_batch and not sc.get("resolve_apply_links", False):
                 for j in found[mark:]:
                     j["ats"] = "linkedin_check"

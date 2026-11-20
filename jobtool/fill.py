@@ -744,9 +744,18 @@ def wrong_place(cfg, job, pg):
     return not in_target_area(Filters(cfg), " ".join(first) + " " + (job.get("location") or "").replace("(Remote)", ""))
 
 
+def header_place(pg):
+    """'On-site in Morrisville, NC' from the LinkedIn job header, for logging."""
+    head = apply_state(pg)
+    kind = re.search(r"\b(on-?site|hybrid|remote)", head, re.I)
+    loc = next((l.split("·")[0].strip() for l in head.split("\n") if "·" in l), "")
+    return f"{kind.group(1).capitalize() if kind else '?'} in {loc or 'unknown location'}"
+
+
 def skip_wrong_place(db, job, pg, log):
-    db.set(job["id"], status="skipped", notes="On-site/hybrid outside your area (LinkedIn's workplace label)")
-    log(f"[{job['id']}] {job['company']} - on-site/hybrid outside your area, skipped")
+    where = header_place(pg)
+    db.set(job["id"], status="skipped", notes=f"{where} - outside your area (LinkedIn's workplace label)")
+    log(f"[{job['id']}] {job['company']} - {where}, skipped")
     try:
         pg.close()
     except Exception:
