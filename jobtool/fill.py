@@ -98,6 +98,14 @@ CONFIRM_RE = re.compile(
 
 
 # ---------------------------------------------------------------- answers
+def window_opts(headless):
+    """Visible browser: start maximized and let pages fill the whole window (a fixed viewport cut forms off
+    at the bottom). Hidden browser: a fixed size."""
+    if headless:
+        return {"viewport": {"width": 1280, "height": 900}}
+    return {"no_viewport": True, "args": ["--start-maximized"]}
+
+
 def norm(s):
     return re.sub(r"\s+", " ", (s or "").lower()).strip()
 
@@ -424,8 +432,7 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True,
     ac = cfg.get("apply", {})
     queue = list(jobs)
     with sync_playwright() as pw:
-        kwargs = dict(headless=headless, slow_mo=ac.get("slow_mo_ms", 0),
-                      viewport={"width": 1280, "height": 900})
+        kwargs = dict(headless=headless, slow_mo=ac.get("slow_mo_ms", 0), **window_opts(headless))
         if ac.get("browser", "chrome") == "chrome":
             kwargs["channel"] = "chrome"
         ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"), **kwargs)
@@ -609,7 +616,7 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
     ac = cfg.get("apply", {})
     queue = [dict(j) for j in jobs]
     with sync_playwright() as pw:
-        kwargs = dict(headless=headless, viewport={"width": 1280, "height": 900})
+        kwargs = dict(headless=headless, **window_opts(headless))
         if ac.get("browser", "chrome") == "chrome":
             kwargs["channel"] = "chrome"
         ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"), **kwargs)

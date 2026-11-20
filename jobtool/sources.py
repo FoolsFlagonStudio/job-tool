@@ -328,8 +328,9 @@ def _launch(pw, cfg, base_dir, persistent=False, headless=True):
         kw["channel"] = "chrome"
     if persistent:   # your signed-in tool browser (same profile apply uses)
         from pathlib import Path
+        from .fill import window_opts
         ctx = pw.chromium.launch_persistent_context(str(Path(base_dir) / "data" / "browser-profile"),
-                                                    viewport={"width": 1280, "height": 900}, **kw)
+                                                    **window_opts(headless), **kw)
         return ctx, ctx
     browser = pw.chromium.launch(**kw)
     return browser, browser.new_context(user_agent=BROWSER_UA, viewport={"width": 1280, "height": 900})
