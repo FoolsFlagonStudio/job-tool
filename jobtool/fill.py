@@ -583,6 +583,19 @@ def apply_kind(pg):
         return "unknown"
 
 
+APPLIED_BUTTON_JS = r"""() => [...document.querySelectorAll('button, [role="button"]')]
+  .some(b => /^\s*applied\s*$/i.test(b.innerText || '') && !b.closest('nav, header, aside, [role="navigation"]')
+             && b.getBoundingClientRect().width > 0)"""
+
+
+def applied_button(pg):
+    """The job's own Apply button now reads 'Applied' (Wellfound after the Undo timer). Menu links don't count."""
+    try:
+        return pg.evaluate(APPLIED_BUTTON_JS)
+    except Exception:
+        return False
+
+
 def dialog_and_top(pg):
     """Popups plus the main content (navigation/header excluded) for non-LinkedIn sites."""
     try:
@@ -657,8 +670,8 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     pg.close()
                     continue
                 is_li = "linkedin.com" in (job["url"] or "")
-                if is_li and EASY_DONE_RE.search(apply_state(pg)):
-                    db.set(job["id"], status="submitted", notes="Already applied on LinkedIn")
+                if (is_li and EASY_DONE_RE.search(apply_state(pg))) or (not is_li and applied_button(pg)):
+                    db.set(job["id"], status="submitted", notes="Already applied" + (" on LinkedIn" if is_li else ""))
                     log(f"[{job['id']}] already applied - skipped")
                     pg.close()
                     continue
@@ -738,7 +751,7 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     if "linkedin.com" in (job["url"] or ""):
                         done = EASY_DONE_RE.search(apply_state(pg))
                     else:
-                        done = OTHER_DONE_RE.search(dialog_and_top(pg))
+                        done = OTHER_DONE_RE.search(dialog_and_top(pg)) or applied_button(pg)
                     if done:
                         db.set(jid, status="submitted")
                         del open_pages[jid]
