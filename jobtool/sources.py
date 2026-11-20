@@ -369,6 +369,34 @@ def _dig(d, *paths):
     return None
 
 
+def _job_rows(d, depth=0):
+    """Find the list of job records in a JSON response, wherever it sits."""
+    if depth > 4:
+        return []
+    if isinstance(d, list):
+        dicts = [x for x in d if isinstance(x, dict)]
+        if dicts and any(("job_information" in x or "apply_url" in x or "v5_processed_job_data" in x
+                          or ("title" in x and ("company" in x or "url" in x))) for x in dicts[:5]):
+            return dicts
+        for x in dicts[:3]:
+            r = _job_rows(x, depth + 1)
+            if r:
+                return r
+        return []
+    if isinstance(d, dict):
+        for k in ("results", "hits", "jobs", "data", "items"):
+            if k in d:
+                r = _job_rows(d[k], depth + 1)
+                if r:
+                    return r
+        for v in d.values():
+            if isinstance(v, (list, dict)):
+                r = _job_rows(v, depth + 1)
+                if r:
+                    return r
+    return []
+
+
 def _hc_job(r):
     v5 = r.get("v5_processed_job_data") or r.get("processed_job_data") or {}
     title = _dig(r, "job_information.title", "title") or v5.get("core_job_title") or ""
@@ -400,19 +428,20 @@ def hiringcafe(cfg, seen, days, base_dir, log=print):
     flt = Filters(cfg)
     found, ids = [], set()
     with sync_playwright() as pw:
-        owner, ctx = _launch(pw, cfg, base_dir, headless=sc.get("headless", True))
+        owner, ctx = _launch(pw, cfg, base_dir, persistent=True, headless=sc.get("headless", False))
         for url in sc.get("searches", []):
-            batch = []
+            batch, seen_json = [], []
 
             def grab(resp):
-                if "/api/search" not in resp.url:
+                if "json" not in (resp.headers.get("content-type") or ""):
                     return
                 try:
                     d = resp.json()
                 except Exception:
                     return
-                rows = d.get("results") or d.get("hits") or d.get("jobs") or (d if isinstance(d, list) else [])
-                batch.extend(r for r in rows if isinstance(r, dict))
+                seen_json.append(resp.url.split("?")[0])
+                rows = _job_rows(d)
+                batch.extend(rows)
 
             page = ctx.new_page()
             page.on("response", grab)
@@ -422,6 +451,13 @@ def hiringcafe(cfg, seen, days, base_dir, log=print):
                 for _ in range(sc.get("scrolls", 6)):     # infinite scroll loads more results
                     page.mouse.wheel(0, 6000)
                     page.wait_for_timeout(1500)
+                if not batch:   # some sites ship the first results inside the page itself
+                    try:
+                        embedded = page.evaluate("() => { const s = document.getElementById('__NEXT_DATA__');"
+                                                 " return s ? JSON.parse(s.textContent) : null; }")
+                        batch.extend(_job_rows(embedded or {}))
+                    except Exception:
+                        pass
                 kept = 0
                 for r in batch:
                     j = _hc_job(r)
@@ -436,8 +472,8 @@ def hiringcafe(cfg, seen, days, base_dir, log=print):
                 name = re.search(r"searchQuery%22%3A%22([^%]+)", url)
                 label = urllib.parse.unquote_plus(name.group(1)) if name else url[:60]
                 if not batch:
-                    log(f"FAIL hiring.cafe '{label}': page loaded no jobs (site may have changed or shown a bot check;"
-                        " try sources.hiringcafe.headless: false)")
+                    log(f"FAIL hiring.cafe '{label}': no jobs found on the page. Page title: {page.title()[:60]!r}")
+                    log(f"     JSON it loaded: {', '.join(dict.fromkeys(seen_json)) or 'none'}  (paste this line to Claude)")
                 else:
                     log(f"OK   hiring.cafe '{label}': {len(batch)} listed, {kept} new")
             except Exception as e:
@@ -486,13 +522,20 @@ def wellfound(cfg, seen, days, base_dir, log=print):
         page = ctx.new_page()
         try:
             page.goto("https://wellfound.com/jobs", wait_until="domcontentloaded", timeout=60000)
-            page.wait_for_timeout(3000)
-            if re.search(r"/login|/join", page.url) or page.get_by_text(re.compile(r"^log in$", re.I)).count():
-                log("     Wellfound: log in in the browser window (it remembers you after this). Waiting up to 5 minutes...")
-                page.wait_for_url(re.compile(r"wellfound\.com/(jobs|home|discover|role)"), timeout=300000)
-                if "/jobs" not in page.url:
+            page.wait_for_timeout(5000)
+            if not page.evaluate(WF_JS):
+                log("     Wellfound: no job listings visible yet. In the browser window, log in (or finish any"
+                    " 'verify you are human' check) and get to the Jobs page.")
+                try:
+                    if input("     Press Enter here when you can see jobs (or type s + Enter to skip Wellfound): ").strip().lower() == "s":
+                        owner.close()
+                        log("SKIP Wellfound")
+                        return []
+                except EOFError:
+                    pass
+                if not page.evaluate(WF_JS) and "/jobs" not in page.url:
                     page.goto("https://wellfound.com/jobs", wait_until="domcontentloaded", timeout=60000)
-                page.wait_for_timeout(3000)
+                    page.wait_for_timeout(4000)
             urls = sc.get("pages") or ["https://wellfound.com/jobs"]
             rows, ids = [], set()
             for u in urls:

@@ -84,7 +84,7 @@ sources:
       - https://www.builtinboston.com/jobs/dev-engineering/mid-level
   hiringcafe:
     enabled: true           # hiring.cafe collects jobs straight from company career pages
-    headless: true          # set false if it stops returning jobs (bot check)
+    headless: false         # visible window: hiring.cafe blocks hidden browsers
     scrolls: 6              # each scroll loads ~40 more results
     # Best: set up a search on hiring.cafe yourself (location, seniority, date), copy the URL from the
     # address bar, and paste it here. These starters search the last 4 days, entry to mid level:
