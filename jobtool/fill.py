@@ -504,6 +504,7 @@ JOB_CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|ap
 # Wellfound (and other non-LinkedIn sites): only an explicit confirmation counts. Their pages have an
 # "Applied" link in the navigation, so a bare "Applied" proves nothing there.
 OTHER_DONE_RE = re.compile(r"application (was |has been )?(sent|submitted)|you('ve| have)? applied|successfully applied|"
+                           r"scheduled to (be )?submit|submits? in \d+ min|\bundo\b\W{0,4}\d{1,2}:\d\d|"
                            r"thanks? (you )?for applying", re.I)
 EASY_DONE_RE = re.compile(r"your application was sent|application submitted|application sent|^applied$|\bapplied \d+ (second|minute|hour|day|week|month)s? ago|"
                           r"\bapplied (just now|today)|you applied", re.I | re.M)
@@ -740,11 +741,14 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                         done = OTHER_DONE_RE.search(dialog_and_top(pg))
                     if done:
                         db.set(jid, status="submitted")
-                        log(f"[{jid}] submitted  ({len(queue)} left in queue)")
                         del open_pages[jid]
                         changed = True
-                        pg.wait_for_timeout(1500)
-                        pg.close()
+                        if "linkedin.com" in (job["url"] or ""):
+                            log(f"[{jid}] submitted  ({len(queue)} left in queue)")
+                            pg.wait_for_timeout(1500)
+                            pg.close()
+                        else:   # Wellfound holds applications ~5 min with an Undo button: leave the tab alone
+                            log(f"[{jid}] submitted - tab left open so you can still Undo  ({len(queue)} left in queue)")
                 if changed:
                     open_next()
                 time.sleep(3)
