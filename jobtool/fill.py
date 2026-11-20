@@ -583,9 +583,18 @@ def apply_kind(pg):
         return "unknown"
 
 
-APPLIED_BUTTON_JS = r"""() => [...document.querySelectorAll('button, [role="button"]')]
-  .some(b => /^\s*applied\s*$/i.test(b.innerText || '') && !b.closest('nav, header, aside, [role="navigation"]')
-             && b.getBoundingClientRect().width > 0)"""
+# The job's OWN button: 'Undo · 4:12' during Wellfound's hold, then 'Applied'. Ignores menus, and pop-up /
+# pinned notices (Wellfound shows another job's pending-application notice on every page).
+APPLIED_BUTTON_JS = r"""() => {
+  const pinned = el => { for (let e = el; e && e !== document.body; e = e.parentElement) {
+      const p = getComputedStyle(e).position; if (p === 'fixed') return true; } return false; };
+  return [...document.querySelectorAll('button, [role="button"]')].some(b => {
+    const t = (b.innerText || '').replace(/\s+/g, ' ').trim();
+    if (!/^(applied|undo\W{0,4}\d{1,2}:\d\d)$/i.test(t)) return false;
+    if (b.closest('nav, header, aside, [role="navigation"], [role="status"], [role="alert"], [class*="toast"], [class*="snackbar"], [class*="banner"]')) return false;
+    return b.getBoundingClientRect().width > 0 && !pinned(b);
+  });
+}"""
 
 
 def applied_button(pg):
@@ -751,7 +760,8 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     if "linkedin.com" in (job["url"] or ""):
                         done = EASY_DONE_RE.search(apply_state(pg))
                     else:
-                        done = OTHER_DONE_RE.search(dialog_and_top(pg)) or applied_button(pg)
+                        done = applied_button(pg) if "wellfound.com" in (pg.url or "") else \
+                            (OTHER_DONE_RE.search(dialog_and_top(pg)) or applied_button(pg))
                     if done:
                         db.set(jid, status="submitted")
                         del open_pages[jid]
