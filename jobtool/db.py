@@ -28,6 +28,11 @@ class DB:
         for col in ("submitted_at", "exported_at", "recruiter"):   # added later: upgrade older databases
             if col not in cols:
                 self.con.execute(f"ALTER TABLE jobs ADD COLUMN {col} TEXT")
+        # one-time repair: Wellfound jobs wrongly marked "already applied" by a LinkedIn-only check
+        fixed = self.con.execute("UPDATE jobs SET status='new', notes='', submitted_at=NULL WHERE ats='wellfound'"
+                                 " AND status='submitted' AND notes='Already applied on LinkedIn'").rowcount
+        if fixed:
+            print(f"(Put {fixed} Wellfound job(s) back in the queue - they were wrongly marked already applied.)")
         self.con.commit()
 
     def seen_keys(self):

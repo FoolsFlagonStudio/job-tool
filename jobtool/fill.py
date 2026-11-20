@@ -494,6 +494,10 @@ def run(db, cfg, profile, base_dir, jobs, headless=False, log=print, watch=True,
 # most of it from your profile). It never clicks anything on LinkedIn for you.
 JOB_CLOSED_RE = re.compile(r"(no longer|not currently) accepting applications|applications? (are|is) (now )?closed|"
                            r"this job (is|has) (no longer available|closed|expired)|job (has been )?(closed|filled)", re.I)
+# Wellfound (and other non-LinkedIn sites): only an explicit confirmation counts. Their pages have an
+# "Applied" link in the navigation, so a bare "Applied" proves nothing there.
+OTHER_DONE_RE = re.compile(r"application (was |has been )?(sent|submitted)|you('ve| have)? applied|successfully applied|"
+                           r"thanks? (you )?for applying", re.I)
 EASY_DONE_RE = re.compile(r"your application was sent|application submitted|application sent|^applied$|\bapplied \d+ (second|minute|hour|day|week|month)s? ago|"
                           r"\bapplied (just now|today)|you applied", re.I | re.M)
 LOGIN_WALL_RE = re.compile(r"sign in to (apply|see|view)|join (now )?to (apply|see)|agree & join", re.I)
@@ -571,6 +575,21 @@ def apply_kind(pg):
         return "unknown"
 
 
+def dialog_and_top(pg):
+    """Popups plus the main content (navigation/header excluded) for non-LinkedIn sites."""
+    try:
+        return pg.evaluate(r"""() => {
+          const parts = [...document.querySelectorAll('[role="dialog"], [class*="modal"], [class*="toast"]')].map(d => d.innerText || '');
+          const main = document.querySelector('main') || document.body;
+          const clone = main.cloneNode(true);
+          clone.querySelectorAll('nav, header, [role="navigation"]').forEach(n => n.remove());
+          parts.push((clone.innerText || '').slice(0, 4000));
+          return parts.join('\n');
+        }""")
+    except Exception:
+        return ""
+
+
 def apply_state(pg):
     try:
         return pg.evaluate(APPLY_STATE_JS)
@@ -629,7 +648,8 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                     log(f"[{job['id']}] could not open: {type(e).__name__}")
                     pg.close()
                     continue
-                if EASY_DONE_RE.search(apply_state(pg)):
+                is_li = "linkedin.com" in (job["url"] or "")
+                if is_li and EASY_DONE_RE.search(apply_state(pg)):
                     db.set(job["id"], status="submitted", notes="Already applied on LinkedIn")
                     log(f"[{job['id']}] already applied - skipped")
                     pg.close()
@@ -707,7 +727,11 @@ def run_easy(db, cfg, base_dir, jobs, keep_open=5, log=print, headless=False, ne
                             move_to_forms(db, job, pg, log)
                             changed = True
                             continue
-                    if EASY_DONE_RE.search(apply_state(pg)):
+                    if "linkedin.com" in (job["url"] or ""):
+                        done = EASY_DONE_RE.search(apply_state(pg))
+                    else:
+                        done = OTHER_DONE_RE.search(dialog_and_top(pg))
+                    if done:
                         db.set(jid, status="submitted")
                         log(f"[{jid}] submitted  ({len(queue)} left in queue)")
                         del open_pages[jid]
