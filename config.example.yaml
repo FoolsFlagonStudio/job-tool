@@ -106,12 +106,11 @@ sources:
     pause_seconds: 8        # seconds between LinkedIn requests (plus a random extra). Raise if you see lots of 429s
     resolve_apply_links: false  # true = 1 extra request per job to find its company link (more throttling).
                                 # Not needed: apply --easy sorts Easy Apply vs company-site jobs while you're signed in.
+    # Each search costs LinkedIn requests (and throttling). These four cover nearly everything; frontend /
+    # backend / web developer searches mostly re-found the same jobs, so they were dropped.
     searches:
       - {keywords: "software engineer", location: "Boston, Massachusetts, United States", distance: 25}
       - {keywords: "full stack engineer", location: "Boston, Massachusetts, United States", distance: 25}
-      - {keywords: "frontend engineer", location: "Boston, Massachusetts, United States", distance: 25}
-      - {keywords: "backend engineer", location: "Boston, Massachusetts, United States", distance: 25}
-      - {keywords: "web developer", location: "Boston, Massachusetts, United States", distance: 25}
       - {keywords: "junior software engineer", location: "United States", remote: true}
       - {keywords: "software engineer I", location: "United States", remote: true}
 
