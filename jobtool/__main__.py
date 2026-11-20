@@ -77,79 +77,85 @@ def company_from_url(url):
 
 
 def cmd_find(args, cfg, db):
+    """Each source's jobs are saved as soon as that source finishes, so stopping a long run (Ctrl+C) keeps
+    everything found up to that point."""
     from . import sources as S
+    from . import connections as C
     seen = db.seen_keys()
     days = args.days or cfg.get("lookback_days", 30)
     want = lambda name: not args.only or name in args.only
-    jobs = []
-    if want("boards"):
-        boards = B.resolve_boards([dict(b) for b in cfg.get("boards", [])], BASE / "data" / "detected_boards.json")
-        # Workday rate-limits hard and its listings change slowly: check it at most every N hours
-        every = cfg.get("workday_every_hours", 6)
-        from datetime import datetime, timezone
-        last = state_get("workday_checked")
-        recent = bool(last) and (datetime.now(timezone.utc) - last).total_seconds() < every * 3600
-        if recent and not args.workday:
-            n = sum(1 for b in boards if str(b.get("ats")).lower() == "workday")
-            boards = [b for b in boards if str(b.get("ats")).lower() != "workday"]
-            if n:
-                print(f"(Skipping {n} Workday companies: checked less than {every}h ago. `find --workday` forces it.)")
-        jobs += B.scan(boards, cfg, seen, days)
-        if not recent or args.workday:
-            if not B.WORKDAY_429["gave_up"]:
-                state_set("workday_checked")
-    if want("builtin"):
-        jobs += S.builtin(cfg, seen, days, BASE)
-    if want("hiringcafe"):
-        jobs += S.hiringcafe(cfg, seen, days, BASE)
-    if want("wellfound"):
-        jobs += S.wellfound(cfg, seen, days, BASE)
-    if want("linkedin"):
-        jobs += S.linkedin(cfg, seen, since=state_get("linkedin_checked"))
-        if S.LINKEDIN_OK["ok"]:
-            state_set("linkedin_checked")
-    from . import connections as C
     conns = C.load(BASE)
-    added, easy, refs = 0, 0, 0
-    reposted = 0
-    for j in jobs:
-        dup = db.same_role_exists(j["company"], j["title"])
-        if dup:
-            if dup["status"] == "closed":     # it was closed and is open again: bring it back
-                db.reopen(dup["id"], j)
-                reposted += 1
-            continue
-        people = C.at(conns, j["company"])
-        if people:
-            j["notes"] = " | ".join(x for x in (C.summary(people), j.get("notes")) if x)
-            j["recruiter"] = "; ".join(f"{p['name']} {p['url']}" for p in people[:3])
-            refs += 1
-        if db.add(j):
-            added += 1
-            easy += j["ats"] in ("linkedin_easy", "linkedin_check")
-    if not want("urls"):
-        print(f"\n{added} new job(s) added.")
-        return
-    # links pasted into urls.txt
-    up = BASE / cfg.get("urls_file", "urls.txt")
-    if up.exists():
-        for line in up.read_text(encoding="utf-8").splitlines():
-            url = line.strip()
-            if not url or url.startswith("#"):
+    n = {"added": 0, "easy": 0, "refs": 0, "reposted": 0}
+
+    def save(jobs):
+        before = n["added"]
+        for j in jobs:
+            dup = db.same_role_exists(j["company"], j["title"])
+            if dup:
+                if dup["status"] == "closed":     # it was closed and is open again: bring it back
+                    db.reopen(dup["id"], j)
+                    n["reposted"] += 1
                 continue
-            clean = url.split("?")[0].rstrip("/")
-            if db.known_url(url) or f"url:{clean}" in seen:
-                continue
-            added += db.add({"key": f"url:{clean}", "company": company_from_url(url),
-                             "title": "(from urls.txt)", "location": "", "url": url,
-                             "ats": ats_from_url(url), "posted": None})
-    print(f"\n{added} new job(s) added. Run `python -m jobtool list` to see them.")
-    if reposted:
-        print(f"{reposted} job(s) you saw closed have been reposted and are back in the queue (marked REPOSTED).")
-    if refs:
-        print(f"{refs} of them are at companies where you have LinkedIn connections: `python -m jobtool list --referrals`")
-    if easy:
-        print(f"{easy} of them are LinkedIn jobs: `python -m jobtool apply --easy` opens them signed in, keeps the Easy Apply"
+            people = C.at(conns, j["company"])
+            if people:
+                j["notes"] = " | ".join(x for x in (C.summary(people), j.get("notes")) if x)
+                j["recruiter"] = "; ".join(f"{p['name']} {p['url']}" for p in people[:3])
+                n["refs"] += 1
+            if db.add(j):
+                n["added"] += 1
+                n["easy"] += j["ats"] in ("linkedin_easy", "linkedin_check")
+                seen.add(j["key"])
+        if n["added"] > before:
+            print(f"     saved {n['added'] - before} new")
+
+    try:
+        if want("boards"):
+            boards = B.resolve_boards([dict(b) for b in cfg.get("boards", [])], BASE / "data" / "detected_boards.json")
+            # Workday rate-limits hard and its listings change slowly: check it at most every N hours
+            every = cfg.get("workday_every_hours", 6)
+            from datetime import datetime, timezone
+            last = state_get("workday_checked")
+            recent = bool(last) and (datetime.now(timezone.utc) - last).total_seconds() < every * 3600
+            if recent and not args.workday:
+                k = sum(1 for b in boards if str(b.get("ats")).lower() == "workday")
+                boards = [b for b in boards if str(b.get("ats")).lower() != "workday"]
+                if k:
+                    print(f"(Skipping {k} Workday companies: checked less than {every}h ago. `find --workday` forces it.)")
+            save(B.scan(boards, cfg, seen, days))
+            if (not recent or args.workday) and not B.WORKDAY_429["gave_up"]:
+                state_set("workday_checked")
+        if want("builtin"):
+            save(S.builtin(cfg, seen, days, BASE))
+        if want("hiringcafe"):
+            save(S.hiringcafe(cfg, seen, days, BASE))
+        if want("wellfound"):
+            save(S.wellfound(cfg, seen, days, BASE))
+        if want("linkedin"):
+            save(S.linkedin(cfg, seen, since=state_get("linkedin_checked"), on_batch=save))
+            if S.LINKEDIN_OK["ok"]:
+                state_set("linkedin_checked")
+        if want("urls"):   # links pasted into urls.txt
+            up = BASE / cfg.get("urls_file", "urls.txt")
+            if up.exists():
+                for line in up.read_text(encoding="utf-8").splitlines():
+                    url = line.strip()
+                    if not url or url.startswith("#"):
+                        continue
+                    clean = url.split("?")[0].rstrip("/")
+                    if db.known_url(url) or f"url:{clean}" in seen:
+                        continue
+                    n["added"] += db.add({"key": f"url:{clean}", "company": company_from_url(url),
+                                          "title": "(from urls.txt)", "location": "", "url": url,
+                                          "ats": ats_from_url(url), "posted": None})
+    except KeyboardInterrupt:
+        print("\nStopped early. Everything found before this point was saved.")
+    print(f"\n{n['added']} new job(s) added. Run `python -m jobtool list` to see them.")
+    if n["reposted"]:
+        print(f"{n['reposted']} job(s) you saw closed have been reposted and are back in the queue (marked REPOSTED).")
+    if n["refs"]:
+        print(f"{n['refs']} of them are at companies where you have LinkedIn connections: `python -m jobtool list --referrals`")
+    if n["easy"]:
+        print(f"{n['easy']} of them are LinkedIn jobs: `python -m jobtool apply --easy` opens them signed in, keeps the Easy Apply"
               " ones and moves company-site ones to the forms queue.")
 
 

@@ -96,7 +96,7 @@ def _window(sc, s, since):
     return "r%d" % int(min(max(secs, 86400), 30 * 86400))
 
 
-def linkedin(cfg, seen, log=print, since=None):
+def linkedin(cfg, seen, log=print, since=None, on_batch=None):
     sc = cfg.get("sources", {}).get("linkedin", {})
     if not sc.get("enabled"):
         return []
@@ -120,6 +120,7 @@ def linkedin(cfg, seen, log=print, since=None):
         if s.get("remote"):
             params["f_WT"] = "2"
         total = kept = 0
+        mark = len(found)
         try:
             for start in range(0, sc.get("max_results_per_search", 100), 10):
                 page = get_html(LI_SEARCH + "?" + urllib.parse.urlencode({**params, "start": start}))
@@ -150,9 +151,19 @@ def linkedin(cfg, seen, log=print, since=None):
                     kept += 1
                 time.sleep(pause + random.random())
             log(f"OK   LinkedIn '{s['keywords']}'{' remote' if s.get('remote') else ''}: {total} listed, {kept} new")
+            if on_batch and not sc.get("resolve_apply_links", False):
+                for j in found[mark:]:
+                    j["ats"] = "linkedin_check"
+                on_batch(found[mark:])      # saved now, not at the end of the run
+                del found[mark:]
             time.sleep(pause * 2 + random.random() * pause)   # extra gap between searches
         except Throttled:
             throttled = True
+            if on_batch and not sc.get("resolve_apply_links", False) and found[mark:]:
+                for j in found[mark:]:
+                    j["ats"] = "linkedin_check"
+                on_batch(found[mark:])
+                del found[mark:]
             log(f"FAIL LinkedIn '{s['keywords']}': still throttled after waiting. Skipping the rest this run; "
                 "the jobs found so far are kept. Try again in an hour.")
         except Exception as e:
